@@ -264,23 +264,6 @@ DrawRays(R3Scene *scene)
   }
 }
 
-static void
-DrawPhotons(R3Scene *scene)
-{
-  double radius = 0.025 * scene->BBox().DiagonalRadius();
-
-  // Draw photons coming out of light sources
-  RNArray<R3Ray *> *light_rays = RaysFromLights(scene);
-  for (int i = 0; i < light_rays->NEntries(); i ++) {
-    R3Ray *light_ray = light_rays->Kth(i);
-    R3Point start = light_ray->Start();
-    R3Vector dir = light_ray->Vector();
-
-    glColor3d(1.0, 1.0, 1.0);
-    R3Span(start, start + dir * 2 * radius).Draw();
-  }
-}
-
 
 ////////////////////////////////////////////////////////////////////////
 // Glut user interface functions

@@ -11,6 +11,114 @@
 #include "R3Graphics/R3Graphics.h"
 
 
+////////////////////////////////////////////////////////////////////////
+// Constant power photon of a specific color
+////////////////////////////////////////////////////////////////////////
+
+class Photon {
+public:
+  enum { R, G, B };
+
+  Photon(R3Ray ray, int color);
+  void Draw(double radius) const;
+
+  const R3Ray ray;
+  const int color;
+};
+
+Photon::Photon(R3Ray ray, int color)
+  : ray(ray), color(color)
+{
+}
+
+void
+Photon::Draw(double radius) const
+{
+  R3Point start = this->ray.Start();
+  R3Vector dir = this->ray.Vector();
+
+  glColor3d(1.0, 1.0, 1.0);
+  R3Span(start, start + dir * 2 * radius).Draw();
+}
+
+////////////////////////////////////////////////////////////////////////
+// Generate photons
+////////////////////////////////////////////////////////////////////////
+
+RNArray<Photon *> *
+PhotonsFromDirLight(R3DirectionalLight *light, int scene_radius)
+{
+  RNArray<Photon *> *photons = new RNArray<Photon *>;
+
+  return photons;
+}
+RNArray<Photon *> *
+PhotonsFromPointLight(R3PointLight *light)
+{
+  RNArray<Photon *> *photons = new RNArray<Photon *>;
+  return photons;
+}
+RNArray<Photon *> *
+PhotonsFromSpotLight(R3SpotLight *light)
+{
+  RNArray<Photon *> *photons = new RNArray<Photon *>;
+  return photons;
+}
+
+static RNArray<Photon *> *cached_light_photons = NULL;
+
+RNArray<Photon *> *
+PhotonsFromLights(R3Scene *scene)
+{
+  // Memoize the result
+  if (cached_light_photons != NULL) {
+    return cached_light_photons;
+  }
+
+  printf("Generating photons from lights.\n");
+
+  RNArray<Photon *> *photons = new RNArray<Photon *>;;
+  double radius = scene->BBox().DiagonalRadius();
+
+  for (int i = 0; i < scene->NLights(); i++) {
+    R3Light *light = scene->Light(i);
+    int light_class = light->ClassID();
+
+    if (light_class == R3DirectionalLight::CLASS_ID()) {
+      photons->Append(*PhotonsFromDirLight((R3DirectionalLight *) light, radius));
+    }
+    else if (light_class == R3PointLight::CLASS_ID()) {
+      photons->Append(*PhotonsFromPointLight((R3PointLight *) light));
+    }
+    else if (light_class == R3SpotLight::CLASS_ID()) {
+      photons->Append(*PhotonsFromSpotLight((R3SpotLight *) light));
+    }
+  }
+
+  R3Ray ray = R3Ray(0,0,0,1,1,1);
+  Photon *photon = new Photon(ray, Photon::R);
+  photons->Insert(photon);
+
+  cached_light_photons = photons;
+  return photons;
+}
+
+////////////////////////////////////////////////////////////////////////
+// Function to draw photons for debugging
+////////////////////////////////////////////////////////////////////////
+
+void
+DrawPhotons(R3Scene *scene)
+{
+  double radius = 0.025 * scene->BBox().DiagonalRadius();
+
+  // Draw photons coming out of light sources
+  RNArray<Photon *> *photons = PhotonsFromLights(scene);
+  for (int i = 0; i < photons->NEntries(); i ++) {
+    Photon *photon = photons->Kth(i);
+    photon->Draw(radius);
+  }
+}
 
 ////////////////////////////////////////////////////////////////////////
 // Function to render image with photon mapping
@@ -80,49 +188,4 @@ RenderImage(R3Scene *scene,
 
   // Return image
   return image;
-}
-
-RNArray<R3Ray *> *
-RaysFromDirLight(R3DirectionalLight *light, int scene_radius)
-{
-  RNArray<R3Ray *> *rays = new RNArray<R3Ray *>;
-  return rays;
-}
-RNArray<R3Ray *> *
-RaysFromPointLight(R3PointLight *light)
-{
-  RNArray<R3Ray *> *rays = new RNArray<R3Ray *>;
-  return rays;
-}
-RNArray<R3Ray *> *
-RaysFromSpotLight(R3SpotLight *light)
-{
-  RNArray<R3Ray *> *rays = new RNArray<R3Ray *>;
-  return rays;
-}
-
-RNArray<R3Ray *> *
-RaysFromLights(R3Scene *scene)
-{
-  RNArray<R3Ray *> *rays = new RNArray<R3Ray *>;;
-  double radius = scene->BBox().DiagonalRadius();
-
-  for (int i = 0; i < scene->NLights(); i++) {
-    R3Light *light = scene->Light(i);
-    int light_class = light->ClassID();
-
-    if (light_class == R3DirectionalLight::CLASS_ID()) {
-      rays->Append(*RaysFromDirLight((R3DirectionalLight *) light, radius));
-    }
-    else if (light_class == R3PointLight::CLASS_ID()) {
-      rays->Append(*RaysFromPointLight((R3PointLight *) light));
-    }
-    else if (light_class == R3SpotLight::CLASS_ID()) {
-      rays->Append(*RaysFromSpotLight((R3SpotLight *) light));
-    }
-  }
-
-  rays->Insert(new R3Ray(0,0,0,1,1,1));
-
-  return rays;
 }
