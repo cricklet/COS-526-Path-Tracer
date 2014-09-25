@@ -45,30 +45,26 @@ Photon::Draw(double radius) const
 // Generate photons
 ////////////////////////////////////////////////////////////////////////
 
-RNArray<Photon *> *
-PhotonsFromDirLight(R3DirectionalLight *light, int scene_radius)
+Photon *
+PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
 {
-  RNArray<Photon *> *photons = new RNArray<Photon *>;
-
-  return photons;
+  return NULL;
 }
-RNArray<Photon *> *
-PhotonsFromPointLight(R3PointLight *light)
+Photon *
+PhotonFromPointLight(R3PointLight *light)
 {
-  RNArray<Photon *> *photons = new RNArray<Photon *>;
-  return photons;
+  return NULL;
 }
-RNArray<Photon *> *
-PhotonsFromSpotLight(R3SpotLight *light)
+Photon *
+PhotonFromSpotLight(R3SpotLight *light)
 {
-  RNArray<Photon *> *photons = new RNArray<Photon *>;
-  return photons;
+  return NULL;
 }
 
 static RNArray<Photon *> *cached_light_photons = NULL;
 
 RNArray<Photon *> *
-PhotonsFromLights(R3Scene *scene)
+PhotonsFromLights(R3Scene *scene, int num)
 {
   // Memoize the result
   if (cached_light_photons != NULL) {
@@ -76,22 +72,22 @@ PhotonsFromLights(R3Scene *scene)
   }
 
   printf("Generating photons from lights.\n");
+  RNArray<Photon *> *photons = new RNArray<Photon *>;
 
-  RNArray<Photon *> *photons = new RNArray<Photon *>;;
   double radius = scene->BBox().DiagonalRadius();
-
-  for (int i = 0; i < scene->NLights(); i++) {
-    R3Light *light = scene->Light(i);
+  for (int i = 0; i < num; i ++) {
+    int light_index = rand() % scene->NLights();
+    R3Light *light = scene->Light(light_index);
     int light_class = light->ClassID();
 
     if (light_class == R3DirectionalLight::CLASS_ID()) {
-      photons->Append(*PhotonsFromDirLight((R3DirectionalLight *) light, radius));
+      photons->Insert(PhotonFromDirLight((R3DirectionalLight *) light, radius));
     }
     else if (light_class == R3PointLight::CLASS_ID()) {
-      photons->Append(*PhotonsFromPointLight((R3PointLight *) light));
+      photons->Insert(PhotonFromPointLight((R3PointLight *) light));
     }
     else if (light_class == R3SpotLight::CLASS_ID()) {
-      photons->Append(*PhotonsFromSpotLight((R3SpotLight *) light));
+      photons->Insert(PhotonFromSpotLight((R3SpotLight *) light));
     }
   }
 
@@ -113,10 +109,12 @@ DrawPhotons(R3Scene *scene)
   double radius = 0.025 * scene->BBox().DiagonalRadius();
 
   // Draw photons coming out of light sources
-  RNArray<Photon *> *photons = PhotonsFromLights(scene);
+  RNArray<Photon *> *photons = PhotonsFromLights(scene, 1000);
   for (int i = 0; i < photons->NEntries(); i ++) {
     Photon *photon = photons->Kth(i);
-    photon->Draw(radius);
+    if (photon != NULL) {
+      photon->Draw(radius);
+    }
   }
 }
 
