@@ -1,0 +1,30 @@
+# This scene has a semi-transparent box on a table top
+# It is good for testing caustics
+
+# A camera 
+camera   1.80 9.9 11.2   -0.055 -0.451 -0.522   -0.005 0.523 -0.853   0.25   0.01 100
+
+# Point light source
+point_light    2 2 2            0 3 6            5000 50 400
+
+# Opaque material
+material 0 0 0 1 1 1 0.1 0.1 0.1 0 0 0 0 0 0 2 1 0
+
+# Transparent Material
+material 0 0 0   0 0 0   0.1 0.02 0.01   1 0.2 0.1   0 0 0   10 1.8 0
+
+# Box for "table top"
+begin  0  
+  1 0 0 0
+  0 1 0 0
+  0 0 1 0
+  0 0 0 1
+  box    -1   -9 -1 -9  9 0 9
+end
+begin  -1  
+  1 0 0 0
+  0 1 0 0
+  0 0 1 0
+  0 0 0 1
+  box 1 -1 0 -1 1 2 1
+end

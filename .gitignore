@@ -1,0 +1,6 @@
+src/kdtview
+src/photonmap
+*o
+*.o
+*~
+*#
