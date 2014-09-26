@@ -264,7 +264,6 @@ DrawRays(R3Scene *scene)
   }
 }
 
-
 ////////////////////////////////////////////////////////////////////////
 // Glut user interface functions
 ////////////////////////////////////////////////////////////////////////
@@ -539,6 +538,16 @@ void GLUTKeyboard(unsigned char key, int x, int y)
 
   case ' ':
     viewer->SetCamera(scene->Camera());
+    break;
+
+  case '-':
+  case '_':
+    viewer->ScaleWorld(R3Point(0,0,0), 0.8);
+    break;
+
+  case '+':
+  case '=':
+    viewer->ScaleWorld(R3Point(0,0,0), 1.25);
     break;
 
   case 27: // ESCAPE
