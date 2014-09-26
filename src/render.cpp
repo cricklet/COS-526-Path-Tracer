@@ -38,7 +38,7 @@ Photon::Draw(double radius) const
   R3Vector dir = this->ray.Vector();
 
   glColor3d(1.0, 1.0, 1.0);
-  R3Span(start, start + dir * 2 * radius).Draw();
+  R3Span(start, start + dir * 4 * radius).Draw();
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -65,6 +65,22 @@ R3Vector RandomVectorUniform() {
   }
 }
 
+R3Vector RandomVectorSpot(R3SpotLight *light) {
+  RNAngle cutoffangle = light->CutOffAngle();
+  RNScalar dropoffrate = light->DropOffRate();
+  R3Vector dir = light->Direction();
+
+  while (true) {
+    R3Vector v = RandomVectorUniform();
+    RNScalar cos_alpha = v.Dot(dir);
+    if (cos_alpha < 0) continue;
+    if (cos(cutoffangle) > cos_alpha) continue;
+
+    RNScalar r = Random();
+    if (r < pow(cos_alpha, dropoffrate)) return v;
+  }
+}
+
 Photon *
 PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
 {
@@ -81,7 +97,10 @@ PhotonFromPointLight(R3PointLight *light)
 Photon *
 PhotonFromSpotLight(R3SpotLight *light)
 {
-  return NULL;
+  R3Ray ray = R3Ray(light->Position(), RandomVectorSpot(light));
+  Photon *photon = new Photon(ray, Photon::R);
+
+  return photon;
 }
 
 
