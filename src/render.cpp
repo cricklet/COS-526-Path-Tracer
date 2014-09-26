@@ -46,6 +46,25 @@ Photon::Draw(double radius) const
 // Generate photons from light sources.
 ////////////////////////////////////////////////////////////////////////
 
+RNScalar Random() {
+  return static_cast <RNScalar> (rand())
+       / static_cast <RNScalar> (RAND_MAX);
+}
+
+R3Vector RandomVectorUniform() {
+  while (true) {
+    RNScalar x = 2.0 * Random() - 1.0;
+    RNScalar y = 2.0 * Random() - 1.0;
+    RNScalar z = 2.0 * Random() - 1.0;
+
+    if (x*x + y*y + z*z > 1.0) continue;
+
+    R3Vector v = R3Vector(x, y, z);
+    v.Normalize();
+    return v;
+  }
+}
+
 Photon *
 PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
 {
@@ -54,7 +73,10 @@ PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
 Photon *
 PhotonFromPointLight(R3PointLight *light)
 {
-  return NULL;
+  R3Ray ray = R3Ray(light->Position(), RandomVectorUniform());
+  Photon *photon = new Photon(ray, Photon::R);
+
+  return photon;
 }
 Photon *
 PhotonFromSpotLight(R3SpotLight *light)
@@ -73,9 +95,7 @@ RNScalar TotalLightIntensity(R3Scene *scene) {
 }
 
 R3Light *RandomLight(R3Scene *scene, RNScalar total_intensity) {
-  RNScalar r = total_intensity
-             * static_cast <RNScalar> (rand())
-             / static_cast <RNScalar> (RAND_MAX);
+  RNScalar r = total_intensity * Random();
 
   for (int i = 0; i < scene->NLights(); i ++) {
     R3Light *light = scene->Light(i);
@@ -121,10 +141,6 @@ PhotonsFromLights(R3Scene *scene, int num)
     }
   }
 
-  R3Ray ray = R3Ray(0,0,0,1,1,1);
-  Photon *photon = new Photon(ray, Photon::R);
-  photons->Insert(photon);
-
   cached_light_photons = photons;
   return photons;
 }
@@ -139,7 +155,7 @@ DrawPhotons(R3Scene *scene)
   double radius = 0.025 * scene->BBox().DiagonalRadius();
 
   // Draw photons coming out of light sources
-  RNArray<Photon *> *photons = PhotonsFromLights(scene, 1000);
+  RNArray<Photon *> *photons = PhotonsFromLights(scene, 100);
   for (int i = 0; i < photons->NEntries(); i ++) {
     Photon *photon = photons->Kth(i);
     if (photon != NULL) {
