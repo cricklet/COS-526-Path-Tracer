@@ -42,7 +42,8 @@ Photon::Draw(double radius) const
 }
 
 ////////////////////////////////////////////////////////////////////////
-// Generate photons
+// Randomly sample light sources based on their intensity.
+// Generate photons from light sources.
 ////////////////////////////////////////////////////////////////////////
 
 Photon *
@@ -61,6 +62,32 @@ PhotonFromSpotLight(R3SpotLight *light)
   return NULL;
 }
 
+
+RNScalar TotalLightIntensity(R3Scene *scene) {
+  RNScalar total = 0;
+  for (int i = 0; i < scene->NLights(); i ++) {
+    R3Light *light = scene->Light(i);
+    total += light->Intensity();
+  }
+  return total;
+}
+
+R3Light *RandomLight(R3Scene *scene, RNScalar total_intensity) {
+  RNScalar r = total_intensity
+             * static_cast <RNScalar> (rand())
+             / static_cast <RNScalar> (RAND_MAX);
+
+  for (int i = 0; i < scene->NLights(); i ++) {
+    R3Light *light = scene->Light(i);
+    r -= light->Intensity();
+
+    if (r < 0) {
+      return light;
+    }
+  }
+  return NULL;
+}
+
 static RNArray<Photon *> *cached_light_photons = NULL;
 
 RNArray<Photon *> *
@@ -74,10 +101,13 @@ PhotonsFromLights(R3Scene *scene, int num)
   printf("Generating photons from lights.\n");
   RNArray<Photon *> *photons = new RNArray<Photon *>;
 
+  RNScalar total_intensity = TotalLightIntensity(scene);
+  printf("Total light intensity %f.\n", total_intensity);
+
   double radius = scene->BBox().DiagonalRadius();
   for (int i = 0; i < num; i ++) {
-    int light_index = rand() % scene->NLights();
-    R3Light *light = scene->Light(light_index);
+    R3Light *light = RandomLight(scene, total_intensity);
+
     int light_class = light->ClassID();
 
     if (light_class == R3DirectionalLight::CLASS_ID()) {
