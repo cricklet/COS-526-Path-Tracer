@@ -37,7 +37,10 @@ Photon::Draw(double radius) const
   R3Point start = this->ray.Start();
   R3Vector dir = this->ray.Vector();
 
-  glColor3d(1.0, 1.0, 1.0);
+  if (color == R) glColor3d(1.0, 0, 0);
+  if (color == G) glColor3d(0, 1.0, 0);
+  if (color == B) glColor3d(0, 0, 1.0);
+
   R3Span(start, start + dir * 4 * radius).Draw();
 }
 
@@ -63,6 +66,20 @@ R3Vector RandomVectorUniform() {
     v.Normalize();
     return v;
   }
+}
+
+int PickColor(R3Light *light) {
+  RNRgb color = light->Color();
+  RNScalar total = color.R() + color.G() + color.B();
+  RNScalar r = Random() * total;
+
+  if (r < color.R()) return Photon::R;
+  r += color.R();
+  if (r < color.G()) return Photon::G;
+  r += color.G();
+  if (r < color.B()) return Photon::B;
+
+  printf("ERROR: color wat");
 }
 
 R3Vector RandomVectorSpot(R3SpotLight *light) {
@@ -108,7 +125,7 @@ PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
   pos -= scene_radius * 2 * dir;
 
   R3Ray ray = R3Ray(pos.Point(), dir);
-  Photon *photon = new Photon(ray, Photon::R);
+  Photon *photon = new Photon(ray, PickColor(light));
 
   return photon;
 }
@@ -116,7 +133,7 @@ Photon *
 PhotonFromPointLight(R3PointLight *light)
 {
   R3Ray ray = R3Ray(light->Position(), RandomVectorUniform());
-  Photon *photon = new Photon(ray, Photon::R);
+  Photon *photon = new Photon(ray, PickColor(light));
 
   return photon;
 }
@@ -124,7 +141,7 @@ Photon *
 PhotonFromSpotLight(R3SpotLight *light)
 {
   R3Ray ray = R3Ray(light->Position(), RandomVectorSpot(light));
-  Photon *photon = new Photon(ray, Photon::R);
+  Photon *photon = new Photon(ray, PickColor(light));
 
   return photon;
 }
@@ -189,6 +206,12 @@ PhotonsFromLights(R3Scene *scene, int num)
   cached_light_photons = photons;
   return photons;
 }
+
+////////////////////////////////////////////////////////////////////////
+// Function for reflections and transmissions
+////////////////////////////////////////////////////////////////////////
+
+
 
 ////////////////////////////////////////////////////////////////////////
 // Function to draw photons for debugging
