@@ -84,7 +84,33 @@ R3Vector RandomVectorSpot(R3SpotLight *light) {
 Photon *
 PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
 {
-  return NULL;
+  R3Vector dir = light->Direction();
+  dir.Normalize();
+
+  R3Vector norm = R3Vector(0,1,0);
+
+  R3Vector axis = R3Vector(norm);
+  axis.Cross(dir);
+  axis.Normalize();
+
+  RNScalar cos_angle = dir.Dot(norm);
+  RNAngle angle = acos(cos_angle);
+
+  RNScalar x, z;
+  while (true) {
+    x = 1.5 * scene_radius * (2.0 * Random() - 1.0);
+    z = 1.5 * scene_radius * (2.0 * Random() - 1.0);
+    if (x*x + z*z < 2 * scene_radius * scene_radius) break;
+  }
+  R3Vector pos = R3Vector(x,0,z);
+
+  pos.Rotate(axis, angle);
+  pos -= scene_radius * 2 * dir;
+
+  R3Ray ray = R3Ray(pos.Point(), dir);
+  Photon *photon = new Photon(ray, Photon::R);
+
+  return photon;
 }
 Photon *
 PhotonFromPointLight(R3PointLight *light)
@@ -174,7 +200,7 @@ DrawPhotons(R3Scene *scene)
   double radius = 0.025 * scene->BBox().DiagonalRadius();
 
   // Draw photons coming out of light sources
-  RNArray<Photon *> *photons = PhotonsFromLights(scene, 100);
+  RNArray<Photon *> *photons = PhotonsFromLights(scene, 1000);
   for (int i = 0; i < photons->NEntries(); i ++) {
     Photon *photon = photons->Kth(i);
     if (photon != NULL) {
