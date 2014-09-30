@@ -20,15 +20,21 @@ public:
   enum { R, G, B };
 
   Photon(R3Ray ray, int color);
+  Photon(R3Ray ray, Photon *photon);
   void Draw(double radius) const;
 
   const R3Ray ray;
-  const R3Vector from_dir;
+  const Photon *source;
   const int color;
 };
 
+Photon::Photon(R3Ray ray, Photon *source)
+  : ray(ray), source(source), color(source->color)
+{
+}
+
 Photon::Photon(R3Ray ray, int color)
-  : ray(ray), color(color)
+  : ray(ray), source(NULL), color(color)
 {
 }
 
@@ -38,9 +44,24 @@ Photon::Draw(double radius) const
   R3Point start = this->ray.Start();
   R3Vector dir = this->ray.Vector();
 
-  if (color == R) glColor3d(1, 0, 0);
-  if (color == G) glColor3d(0, 1, 0);
-  if (color == B) glColor3d(0, 0, 1);
+  if (this->source != NULL) {
+    R3Point source = this->source->ray.Start();
+
+    float a = 0.4;
+    float b = 0.6;
+
+    if (color == R) glColor3d(b,a,a);
+    if (color == G) glColor3d(a,b,a);
+    if (color == B) glColor3d(a,a,b);
+    R3Span(source, start).Draw();
+  }
+
+  float a = 0.3;
+  float b = 1;
+
+  if (color == R) glColor3d(b,a,a);
+  if (color == G) glColor3d(a,b,a);
+  if (color == B) glColor3d(a,a,b);
 
   R3Span(start, start + dir * radius).Draw();
 }
@@ -216,7 +237,7 @@ Photon *
 DiffuseBounce(Photon *source_photon, R3Point pos, R3Vector norm) {
   R3Vector dir = RandomVectorInDir(norm);
   R3Ray ray = R3Ray(pos, dir);
-  Photon *photon = new Photon(ray, source_photon->color);
+  Photon *photon = new Photon(ray, source_photon);
   return photon;
 }
 
@@ -227,7 +248,7 @@ SpecularBounce(Photon *source_photon,
   R3Vector dir = 2 * inters_norm * inters_norm.Dot(source_dir) - source_dir;
 
   R3Ray ray = R3Ray(inters_pos, dir);
-  Photon *photon = new Photon(ray, source_photon->color);
+  Photon *photon = new Photon(ray, source_photon);
   return photon;
 }
 
@@ -235,26 +256,33 @@ Photon *
 TransmissionBounce(Photon *source_photon,
     RNScalar index_of_refraction,
     R3Point inters_pos, R3Vector inters_norm) {
-  R3Vector source_dir = -source_photon->ray.Vector();
-  inters_norm.Normalize();
-  source_dir.Normalize();
 
-  RNScalar ir_ratio;
-  if (source_dir.Dot(inters_norm) > 0) {
-    ir_ratio = 1.0 / index_of_refraction;
+  R3Vector l = - source_photon->ray.Vector();
+  R3Vector n;
+  RNScalar ni;
+  RNScalar nr;
+
+  if (l.Dot(inters_norm) > 0) {
+    ni = 1.0;
+    nr = index_of_refraction;
+    n = inters_norm;
   } else {
-    ir_ratio = index_of_refraction / 1.0;
+    ni = index_of_refraction;
+    nr = 1.0;
+    n = - inters_norm;
   }
 
-  // Snell's law
-  RNScalar theta_i = acos(source_dir.Dot(inters_norm));
-  RNScalar theta_r = asin(ir_ratio * sin(theta_i));
+  RNScalar ratio = ni / nr;
 
-  R3Vector dir = inters_norm * (ir_ratio * cos(theta_i) - cos(theta_r))
-                 - source_dir * ir_ratio;
+  // Snell's law
+  RNScalar theta_i = acos(l.Dot(n));
+  RNScalar theta_r = asin(ratio * sin(theta_i));
+
+  R3Vector dir = n * (ratio * cos(theta_i) - cos(theta_r))
+               - l * ratio;
 
   R3Ray ray = R3Ray(inters_pos, dir);
-  Photon *photon = new Photon(ray, source_photon->color);
+  Photon *photon = new Photon(ray, source_photon);
   return photon;
 }
 
@@ -267,7 +295,11 @@ ScatterPhoton(Photon *source_photon, R3Scene *scene) {
   R3Vector normal;
   RNScalar t;
 
-  RNBoolean intersected = scene->Intersects(source_photon->ray,
+  // offset the ray a bit
+  R3Ray ray = R3Ray(source_photon->ray.Point(0.01),
+                    source_photon->ray.Vector());
+
+  RNBoolean intersected = scene->Intersects(ray,
     &node, &element, &shape, &point, &normal, &t);
 
   if (intersected) {
@@ -279,19 +311,20 @@ ScatterPhoton(Photon *source_photon, R3Scene *scene) {
     RNScalar ks = brdf->Specular()[color];
     RNScalar kt = brdf->Transmission()[color];
 
+    if (kt > 0) {
+      RNScalar ir = brdf->IndexOfRefraction();
+      return TransmissionBounce(source_photon, ir, point, normal);
+    } else return NULL;
+
     RNScalar r = Random();
     if (r < kd) {
-      // diffuse bounce
       return DiffuseBounce(source_photon, point, normal);
     } else if (r < ks + kd) {
-      // specular bounce
       return SpecularBounce(source_photon, point, normal);
     } else if (r < kt + ks + kd) {
-      // transmission
       RNScalar ir = brdf->IndexOfRefraction();
       return TransmissionBounce(source_photon, ir, point, normal);
     }
-    r -= kt;
   }
 
   return NULL;
@@ -326,7 +359,7 @@ GenerateAndCachePhotons(R3Scene *scene) {
   if (cached_photons != NULL) {
     return cached_photons;
   }
-  RNArray<Photon *> *photons1 = PhotonsFromLights(scene, 100000);
+  RNArray<Photon *> *photons1 = PhotonsFromLights(scene, 10000);
   RNArray<Photon *> *photons2 = ScatterPhotons(photons1, scene);
   RNArray<Photon *> *photons3 = ScatterPhotons(photons2, scene);
 
