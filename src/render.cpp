@@ -23,6 +23,7 @@ public:
   void Draw(double radius) const;
 
   const R3Ray ray;
+  const R3Vector from_dir;
   const int color;
 };
 
@@ -41,7 +42,7 @@ Photon::Draw(double radius) const
   if (color == G) glColor3d(0, 1, 0);
   if (color == B) glColor3d(0, 0, 1);
 
-  R3Span(start, start + dir * 4 * radius).Draw();
+  R3Span(start, start + dir * radius).Draw();
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -178,16 +179,9 @@ R3Light *RandomLight(R3Scene *scene, RNScalar total_intensity) {
   return NULL;
 }
 
-static RNArray<Photon *> *cached_light_photons = NULL;
-
 RNArray<Photon *> *
 PhotonsFromLights(R3Scene *scene, int num)
 {
-  // Memoize the result
-  if (cached_light_photons != NULL) {
-    return cached_light_photons;
-  }
-
   printf("Generating photons from lights.\n");
   RNArray<Photon *> *photons = new RNArray<Photon *>;
 
@@ -211,7 +205,6 @@ PhotonsFromLights(R3Scene *scene, int num)
     }
   }
 
-  cached_light_photons = photons;
   return photons;
 }
 
@@ -232,6 +225,33 @@ SpecularBounce(Photon *source_photon,
     R3Point inters_pos, R3Vector inters_norm) {
   R3Vector source_dir = -source_photon->ray.Vector();
   R3Vector dir = 2 * inters_norm * inters_norm.Dot(source_dir) - source_dir;
+
+  R3Ray ray = R3Ray(inters_pos, dir);
+  Photon *photon = new Photon(ray, source_photon->color);
+  return photon;
+}
+
+Photon *
+TransmissionBounce(Photon *source_photon,
+    RNScalar index_of_refraction,
+    R3Point inters_pos, R3Vector inters_norm) {
+  R3Vector source_dir = -source_photon->ray.Vector();
+  inters_norm.Normalize();
+  source_dir.Normalize();
+
+  RNScalar ir_ratio;
+  if (source_dir.Dot(inters_norm) > 0) {
+    ir_ratio = 1.0 / index_of_refraction;
+  } else {
+    ir_ratio = index_of_refraction / 1.0;
+  }
+
+  // Snell's law
+  RNScalar theta_i = acos(source_dir.Dot(inters_norm));
+  RNScalar theta_r = asin(ir_ratio * sin(theta_i));
+
+  R3Vector dir = inters_norm * (ir_ratio * cos(theta_i) - cos(theta_r))
+                 - source_dir * ir_ratio;
 
   R3Ray ray = R3Ray(inters_pos, dir);
   Photon *photon = new Photon(ray, source_photon->color);
@@ -262,18 +282,14 @@ ScatterPhoton(Photon *source_photon, R3Scene *scene) {
     RNScalar r = Random();
     if (r < kd) {
       // diffuse bounce
-      //return DiffuseBounce(source_photon, point, normal);
-    }
-    r -= kd;
-
-    if (r < ks) {
+      return DiffuseBounce(source_photon, point, normal);
+    } else if (r < ks + kd) {
       // specular bounce
       return SpecularBounce(source_photon, point, normal);
-    }
-    r -= ks;
-
-    if (r < kt) {
+    } else if (r < kt + ks + kd) {
       // transmission
+      RNScalar ir = brdf->IndexOfRefraction();
+      return TransmissionBounce(source_photon, ir, point, normal);
     }
     r -= kt;
   }
@@ -281,17 +297,10 @@ ScatterPhoton(Photon *source_photon, R3Scene *scene) {
   return NULL;
 }
 
-static RNArray<Photon *> *cached_scattered_photons = NULL;
-
 RNArray<Photon *> *
 ScatterPhotons(RNArray<Photon *> *source_photons, R3Scene *scene)
 {
   RNArray<Photon *> *scattered_photons = new RNArray<Photon *>;
-
-  // Memoize the result
-  if (cached_scattered_photons != NULL) {
-    return cached_scattered_photons;
-  }
 
   for (int i = 0; i < source_photons->NEntries(); i ++) {
     Photon *source_photon = source_photons->Kth(i);
@@ -301,7 +310,6 @@ ScatterPhotons(RNArray<Photon *> *source_photons, R3Scene *scene)
     }
   }
 
-  cached_scattered_photons = scattered_photons;
   return scattered_photons;
 }
 
@@ -311,24 +319,32 @@ ScatterPhotons(RNArray<Photon *> *source_photons, R3Scene *scene)
 // Function to draw photons for debugging
 ////////////////////////////////////////////////////////////////////////
 
+static RNArray<Photon *> *cached_photons = NULL;
+
+RNArray<Photon *> *
+GenerateAndCachePhotons(R3Scene *scene) {
+  if (cached_photons != NULL) {
+    return cached_photons;
+  }
+  RNArray<Photon *> *photons1 = PhotonsFromLights(scene, 100000);
+  RNArray<Photon *> *photons2 = ScatterPhotons(photons1, scene);
+  RNArray<Photon *> *photons3 = ScatterPhotons(photons2, scene);
+
+  cached_photons = new RNArray<Photon *>;
+  cached_photons->Append(*photons1);
+  cached_photons->Append(*photons2);
+  cached_photons->Append(*photons3);
+
+  return cached_photons;
+}
+
 void
 DrawPhotons(R3Scene *scene)
 {
   double radius = 0.025 * scene->BBox().DiagonalRadius();
-
-  // Draw photons coming out of light sources
-  RNArray<Photon *> *photons = PhotonsFromLights(scene, 10000);
+  RNArray<Photon *> *photons = GenerateAndCachePhotons(scene);
   for (int i = 0; i < photons->NEntries(); i ++) {
     Photon *photon = photons->Kth(i);
-    if (photon != NULL) {
-      photon->Draw(radius);
-    }
-  }
-
-  // Draw scattered photons
-  RNArray<Photon *> *photons2 = ScatterPhotons(photons, scene);
-  for (int i = 0; i < photons2->NEntries(); i ++) {
-    Photon *photon = photons2->Kth(i);
     if (photon != NULL) {
       photon->Draw(radius);
     }
