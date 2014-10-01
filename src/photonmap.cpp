@@ -542,12 +542,12 @@ void GLUTKeyboard(unsigned char key, int x, int y)
 
   case '-':
   case '_':
-    viewer->ScaleWorld(R3Point(0,0,0), 0.8);
+    viewer->ScaleWorld(center, 0.8);
     break;
 
   case '+':
   case '=':
-    viewer->ScaleWorld(R3Point(0,0,0), 1.25);
+    viewer->ScaleWorld(center, 1.25);
     break;
 
   case 27: // ESCAPE

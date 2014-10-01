@@ -21,7 +21,7 @@ public:
 
   Photon(R3Ray ray, int color);
   Photon(R3Ray ray, Photon *photon);
-  void Draw(double radius) const;
+  void Draw(double radius, bool show_path) const;
 
   const R3Ray ray;
   const Photon *source;
@@ -39,16 +39,16 @@ Photon::Photon(R3Ray ray, int color)
 }
 
 void
-Photon::Draw(double radius) const
+Photon::Draw(double radius, bool show_path) const
 {
   R3Point start = this->ray.Start();
   R3Vector dir = this->ray.Vector();
 
-  if (this->source != NULL) {
+  if (this->source != NULL && show_path) {
     R3Point source = this->source->ray.Start();
 
-    float a = 0.4;
-    float b = 0.6;
+    float a = 0.0;
+    float b = 0.;
 
     if (color == R) glColor3d(b,a,a);
     if (color == G) glColor3d(a,b,a);
@@ -348,39 +348,70 @@ ScatterPhotons(RNArray<Photon *> *source_photons, R3Scene *scene)
 // Function to draw photons for debugging
 ////////////////////////////////////////////////////////////////////////
 
-static RNArray<Photon *> *cached_photons = NULL;
+static RNArray<Photon *> *cached_all_photons = NULL;
+static RNArray<Photon *> *cached_final_photons = NULL;
+
+void
+CachePhotons(R3Scene *scene) {
+  if (cached_all_photons != NULL && cached_final_photons != NULL) {
+    return;
+  }
+
+  RNArray<Photon *> *photons = PhotonsFromLights(scene, 10000);
+  printf("Creating initial %d photons\n", photons->NEntries());
+
+  RNArray<Photon *> *final_photons = new RNArray<Photon *>;
+  for (int i = 0; i < photons->NEntries(); i ++) {
+    Photon *photon = photons->Kth(i);
+    Photon *scattered_photon = ScatterPhoton(photon, scene);
+    if (scattered_photon != NULL) {
+      photons->Insert(scattered_photon);
+    } else {
+      final_photons->Insert(photon);
+    }
+  }
+
+  printf("Finished with %d photons\n", photons->NEntries());
+
+  cached_all_photons = photons;
+  cached_final_photons = final_photons;
+}
 
 RNArray<Photon *> *
-GenerateAndCachePhotons(R3Scene *scene) {
-  if (cached_photons != NULL) {
-    return cached_photons;
-  }
+GetFinalPhotons(R3Scene *scene) {
+  CachePhotons(scene);
+  return cached_final_photons;
+}
 
-  RNArray<Photon *> *current_photons = PhotonsFromLights(scene, 100000);
-  printf("Creating initial %d photons\n", current_photons->NEntries());
-
-  RNArray<Photon *> *all_photons = new RNArray<Photon *>;
-
-  while (current_photons->NEntries() > 0) {
-    printf("Scattering photons %d photons\n", current_photons->NEntries());
-    all_photons->Append(*current_photons);
-    current_photons = ScatterPhotons(current_photons, scene);
-  }
-  all_photons->Append(*current_photons);
-
-  cached_photons = all_photons;
-  return cached_photons;
+RNArray<Photon *> *
+GetAllPhotons(R3Scene *scene) {
+  CachePhotons(scene);
+  return cached_all_photons;
 }
 
 void
 DrawPhotons(R3Scene *scene)
 {
   double radius = 0.025 * scene->BBox().DiagonalRadius();
-  RNArray<Photon *> *photons = GenerateAndCachePhotons(scene);
-  for (int i = 0; i < photons->NEntries(); i ++) {
-    Photon *photon = photons->Kth(i);
+
+  RNArray<Photon *> *all = GetAllPhotons(scene);
+  for (int i = 0; i < all->NEntries(); i ++) {
+    Photon *photon = all->Kth(i);
     if (photon != NULL) {
-      photon->Draw(radius);
+      photon->Draw(radius * 0.3, false);
+    }
+  }
+
+  RNArray<Photon *> *final = GetAllPhotons(scene);
+  for (int i = 0; i < final->NEntries(); i ++) {
+    if (Random() < 0.999) {
+      continue;
+    }
+
+    const Photon *photon = all->Kth(i);
+    while (photon != NULL) {
+      photon->Draw(radius, true);
+      photon = photon->source;
     }
   }
 }
