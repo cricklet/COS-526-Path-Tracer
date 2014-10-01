@@ -58,7 +58,7 @@ Photon::Draw(double radius, bool show_path) const
     R3Point source = this->source->ray.Start();
 
     float a = 0.0;
-    float b = 0.;
+    float b = 1.0;
 
     if (color == R) glColor3d(b,a,a);
     if (color == G) glColor3d(a,b,a);
