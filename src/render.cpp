@@ -310,13 +310,9 @@ ScatterPhoton(Photon *source_photon, R3Scene *scene) {
     RNScalar kd = brdf->Diffuse()[color];
     RNScalar ks = brdf->Specular()[color];
     RNScalar kt = brdf->Transmission()[color];
+    RNScalar k_total = fmax(1.0, kd + ks + kt);
 
-    if (kt > 0) {
-      RNScalar ir = brdf->IndexOfRefraction();
-      return TransmissionBounce(source_photon, ir, point, normal);
-    } else return NULL;
-
-    RNScalar r = Random();
+    RNScalar r = Random() * k_total;
     if (r < kd) {
       return DiffuseBounce(source_photon, point, normal);
     } else if (r < ks + kd) {
@@ -359,15 +355,20 @@ GenerateAndCachePhotons(R3Scene *scene) {
   if (cached_photons != NULL) {
     return cached_photons;
   }
-  RNArray<Photon *> *photons1 = PhotonsFromLights(scene, 10000);
-  RNArray<Photon *> *photons2 = ScatterPhotons(photons1, scene);
-  RNArray<Photon *> *photons3 = ScatterPhotons(photons2, scene);
 
-  cached_photons = new RNArray<Photon *>;
-  cached_photons->Append(*photons1);
-  cached_photons->Append(*photons2);
-  cached_photons->Append(*photons3);
+  RNArray<Photon *> *current_photons = PhotonsFromLights(scene, 100000);
+  printf("Creating initial %d photons\n", current_photons->NEntries());
 
+  RNArray<Photon *> *all_photons = new RNArray<Photon *>;
+
+  while (current_photons->NEntries() > 0) {
+    printf("Scattering photons %d photons\n", current_photons->NEntries());
+    all_photons->Append(*current_photons);
+    current_photons = ScatterPhotons(current_photons, scene);
+  }
+  all_photons->Append(*current_photons);
+
+  cached_photons = all_photons;
   return cached_photons;
 }
 
