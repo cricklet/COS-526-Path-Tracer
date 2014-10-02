@@ -11,15 +11,34 @@
 #include "R3Graphics/R3Graphics.h"
 
 
+RNScalar Random() {
+  return static_cast <RNScalar> (rand())
+       / static_cast <RNScalar> (RAND_MAX);
+}
+
 ////////////////////////////////////////////////////////////////////////
 // Constant power photon of a specific color for path tracing
 ////////////////////////////////////////////////////////////////////////
 
 struct RenderPhoton {
   R3Point position;
-  RNScalar phi, theta; // incident direction
+  R3Vector incident;
   RNRgb rgb;
 };
+
+static R3Point
+GetRenderPhotonPointPosition(RenderPhoton *photon, void *dummy)
+{
+  // Return point position (used for Kdtree)
+  return photon->position;
+}
+
+void DrawRenderPhoton(RenderPhoton *photon, double radius) {
+  glColor3d(photon->rgb.R(), photon->rgb.G(), photon->rgb.B());
+
+  R3Point pos = photon->position;
+  R3Span(pos, pos - photon->incident * radius).Draw();
+}
 
 ////////////////////////////////////////////////////////////////////////
 // Constant power photon of a specific color for path tracing
@@ -31,7 +50,8 @@ public:
 
   Photon(R3Ray ray, int color);
   Photon(R3Ray ray, Photon *photon);
-  void Draw(double radius, bool show_path) const;
+  void Draw(double radius) const;
+  void DrawPath(double radius) const;
 
   const R3Ray ray;
   const Photon *source;
@@ -49,42 +69,40 @@ Photon::Photon(R3Ray ray, int color)
 }
 
 void
-Photon::Draw(double radius, bool show_path) const
+Photon::Draw(double radius) const
 {
+  if (color == R) glColor3d(1,0,0);
+  if (color == G) glColor3d(0,1,0);
+  if (color == B) glColor3d(0,0,1);
+
   R3Point start = this->ray.Start();
   R3Vector dir = this->ray.Vector();
 
-  if (this->source != NULL && show_path) {
-    R3Point source = this->source->ray.Start();
-
-    float a = 0.0;
-    float b = 1.0;
-
-    if (color == R) glColor3d(b,a,a);
-    if (color == G) glColor3d(a,b,a);
-    if (color == B) glColor3d(a,a,b);
-    R3Span(source, start).Draw();
-  }
-
-  float a = 0.3;
-  float b = 1;
-
-  if (color == R) glColor3d(b,a,a);
-  if (color == G) glColor3d(a,b,a);
-  if (color == B) glColor3d(a,a,b);
-
   R3Span(start, start + dir * radius).Draw();
+}
+
+void
+Photon::DrawPath(double radius) const
+{
+  if (color == R) glColor3d(1,0,0);
+  if (color == G) glColor3d(0,1,0);
+  if (color == B) glColor3d(0,0,1);
+
+  const Photon *photon = this;
+  while (photon != NULL && photon->source != NULL) {
+    R3Point start = photon->ray.Start();
+    R3Point end = photon->source->ray.Start();
+
+    R3Span(start, end).Draw();
+
+    photon = photon->source;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////
 // Randomly sample light sources based on their intensity.
 // Generate photons from light sources.
 ////////////////////////////////////////////////////////////////////////
-
-RNScalar Random() {
-  return static_cast <RNScalar> (rand())
-       / static_cast <RNScalar> (RAND_MAX);
-}
 
 R3Vector RandomVectorUniform() {
   while (true) {
@@ -352,22 +370,72 @@ ScatterPhotons(RNArray<Photon *> *source_photons, R3Scene *scene)
   return scattered_photons;
 }
 
+////////////////////////////////////////////////////////////////////////
+// Store the photons in a KDTree and render them!
+////////////////////////////////////////////////////////////////////////
 
+RenderPhoton *
+ProcessRenderPhoton(Photon *photon) {
+  if (photon->source == NULL) return NULL;
+
+  R3Point position = photon->ray.Start();
+  R3Point source = photon->source->ray.Start();
+  R3Vector incident = position - source;
+  incident.Normalize();
+
+  RenderPhoton *render_photon = new RenderPhoton;
+  render_photon->position = position;
+  render_photon->incident = incident;
+
+  int color = photon->color;
+  RNRgb rgb;
+  if (color == Photon::R)      rgb = RNRgb(1,0,0);
+  else if (color == Photon::G) rgb = RNRgb(0,1,0);
+  else if (color == Photon::B) rgb = RNRgb(0,0,1);
+
+  render_photon->rgb = rgb;
+
+  return render_photon;
+}
+
+RNArray<RenderPhoton *> *
+GenerateRenderPhotons(RNArray<Photon *> *photons, const R3Box& bbox) {
+  RNArray<RenderPhoton *> *render_photons = new RNArray<RenderPhoton *>;
+
+  for (int i = 0; i < photons->NEntries(); i ++) {
+    Photon *photon = photons->Kth(i);
+    RenderPhoton *render_photon = ProcessRenderPhoton(photon);
+    if (render_photon != NULL) {
+      render_photons->Insert(render_photon);
+    }
+  }
+
+  return render_photons;
+}
 
 ////////////////////////////////////////////////////////////////////////
-// Function to draw photons for debugging
+// Function for generating + caching photons
+// (both path tracing + rendering)
 ////////////////////////////////////////////////////////////////////////
 
 static RNArray<Photon *> *cached_all_photons = NULL;
 static RNArray<Photon *> *cached_final_photons = NULL;
 
+static RNArray<RenderPhoton *> *cached_render_photons = NULL;
+static R3Kdtree<RenderPhoton *> *cached_kd_render_photons = NULL;
+
 void
 CachePhotons(R3Scene *scene) {
-  if (cached_all_photons != NULL && cached_final_photons != NULL) {
+  if (cached_final_photons     != NULL
+      && cached_render_photons != NULL
+      && cached_all_photons    != NULL) {
     return;
   }
 
-  RNArray<Photon *> *photons = PhotonsFromLights(scene, 10000);
+  int initial_photons = 10000;
+  int total_photons = initial_photons * 6;
+
+  RNArray<Photon *> *photons = PhotonsFromLights(scene, initial_photons);
   printf("Creating initial %d photons\n", photons->NEntries());
 
   RNArray<Photon *> *final_photons = new RNArray<Photon *>;
@@ -379,12 +447,26 @@ CachePhotons(R3Scene *scene) {
     } else {
       final_photons->Insert(photon);
     }
+
+    if (photons->NEntries() > total_photons) {
+      break;
+    }
   }
 
   printf("Finished with %d photons\n", photons->NEntries());
 
+  RNArray<RenderPhoton *> *render_photons =
+    GenerateRenderPhotons(photons, scene->BBox());
+  R3Kdtree<RenderPhoton *> *kd_render_photons =
+    new R3Kdtree<RenderPhoton *>(*render_photons, GetRenderPhotonPointPosition);
+
+  printf("Moved %d render photons into a kd tree\n",
+         render_photons->NEntries());
+
   cached_all_photons = photons;
   cached_final_photons = final_photons;
+  cached_render_photons = render_photons;
+  cached_kd_render_photons = kd_render_photons;
 }
 
 RNArray<Photon *> *
@@ -399,29 +481,43 @@ GetAllPhotons(R3Scene *scene) {
   return cached_all_photons;
 }
 
+RNArray<RenderPhoton *> *
+GetRenderPhotons(R3Scene *scene) {
+  CachePhotons(scene);
+  return cached_render_photons;
+}
+
+////////////////////////////////////////////////////////////////////////
+// Function to draw debugging data
+////////////////////////////////////////////////////////////////////////
+
+void
+DrawRenderPhotons(R3Scene *scene)
+{
+  double radius = 0.025 * scene->BBox().DiagonalRadius();
+
+  RNArray<RenderPhoton *> *photons = GetRenderPhotons(scene);
+  for (int i = 0; i < photons->NEntries(); i ++) {
+    DrawRenderPhoton(photons->Kth(i), radius);
+  }
+}
+
 void
 DrawPhotons(R3Scene *scene)
 {
-  double radius = 0.025 * scene->BBox().DiagonalRadius();
+  double radius = 0.01 * scene->BBox().DiagonalRadius();
 
   RNArray<Photon *> *all = GetAllPhotons(scene);
   for (int i = 0; i < all->NEntries(); i ++) {
     Photon *photon = all->Kth(i);
-    if (photon != NULL) {
-      photon->Draw(radius * 0.3, false);
-    }
+    photon->Draw(radius);
   }
 
   RNArray<Photon *> *final = GetAllPhotons(scene);
   for (int i = 0; i < final->NEntries(); i ++) {
-    if (Random() < 0.999) {
-      continue;
-    }
-
-    const Photon *photon = all->Kth(i);
-    while (photon != NULL) {
-      photon->Draw(radius, true);
-      photon = photon->source;
+    Photon *photon = all->Kth(i);
+    if (Random() > 0.999) {
+      photon->DrawPath(radius);
     }
   }
 }
