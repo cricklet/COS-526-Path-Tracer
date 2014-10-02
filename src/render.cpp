@@ -47,24 +47,26 @@ void DrawRenderPhoton(RenderPhoton *photon, double radius) {
 class Photon {
 public:
   enum { R, G, B };
+  enum { LIGHT, DIFFUSE, SPECULAR, TRANSMISSION };
 
-  Photon(R3Ray ray, int color);
-  Photon(R3Ray ray, Photon *photon);
+  Photon(R3Ray ray, int color, int photon_type);
+  Photon(R3Ray ray, Photon *photon, int photon_type);
   void Draw(double radius) const;
   void DrawPath(double radius) const;
 
   const R3Ray ray;
   const Photon *source;
   const int color;
+  const int photon_type;
 };
 
-Photon::Photon(R3Ray ray, Photon *source)
-  : ray(ray), source(source), color(source->color)
+Photon::Photon(R3Ray ray, Photon *source, int photon_type)
+  : ray(ray), source(source), color(source->color), photon_type(photon_type)
 {
 }
 
-Photon::Photon(R3Ray ray, int color)
-  : ray(ray), source(NULL), color(color)
+Photon::Photon(R3Ray ray, int color, int photon_type)
+  : ray(ray), source(NULL), color(color), photon_type(photon_type)
 {
 }
 
@@ -183,7 +185,7 @@ PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
   pos -= scene_radius * 2 * dir;
 
   R3Ray ray = R3Ray(pos.Point(), dir);
-  Photon *photon = new Photon(ray, PickColor(light));
+  Photon *photon = new Photon(ray, PickColor(light), Photon::LIGHT);
 
   return photon;
 }
@@ -191,7 +193,7 @@ Photon *
 PhotonFromPointLight(R3PointLight *light)
 {
   R3Ray ray = R3Ray(light->Position(), RandomVectorUniform());
-  Photon *photon = new Photon(ray, PickColor(light));
+  Photon *photon = new Photon(ray, PickColor(light), Photon::LIGHT);
 
   return photon;
 }
@@ -199,7 +201,7 @@ Photon *
 PhotonFromSpotLight(R3SpotLight *light)
 {
   R3Ray ray = R3Ray(light->Position(), RandomVectorSpot(light));
-  Photon *photon = new Photon(ray, PickColor(light));
+  Photon *photon = new Photon(ray, PickColor(light), Photon::LIGHT);
 
   return photon;
 }
@@ -265,7 +267,7 @@ Photon *
 DiffuseBounce(Photon *source_photon, R3Point pos, R3Vector norm) {
   R3Vector dir = RandomVectorInDir(norm);
   R3Ray ray = R3Ray(pos, dir);
-  Photon *photon = new Photon(ray, source_photon);
+  Photon *photon = new Photon(ray, source_photon, Photon::DIFFUSE);
   return photon;
 }
 
@@ -276,7 +278,7 @@ SpecularBounce(Photon *source_photon,
   R3Vector dir = 2 * inters_norm * inters_norm.Dot(source_dir) - source_dir;
 
   R3Ray ray = R3Ray(inters_pos, dir);
-  Photon *photon = new Photon(ray, source_photon);
+  Photon *photon = new Photon(ray, source_photon, Photon::SPECULAR);
   return photon;
 }
 
@@ -310,7 +312,7 @@ TransmissionBounce(Photon *source_photon,
                - l * ratio;
 
   R3Ray ray = R3Ray(inters_pos, dir);
-  Photon *photon = new Photon(ray, source_photon);
+  Photon *photon = new Photon(ray, source_photon, Photon::TRANSMISSION);
   return photon;
 }
 
@@ -492,7 +494,18 @@ GetRenderPhotons(R3Scene *scene) {
 ////////////////////////////////////////////////////////////////////////
 
 void
-DrawRenderPhotons(R3Scene *scene)
+DrawCausticPhotons(R3Scene *scene)
+{
+  double radius = 0.025 * scene->BBox().DiagonalRadius();
+
+  RNArray<RenderPhoton *> *photons = GetRenderPhotons(scene);
+  for (int i = 0; i < photons->NEntries(); i ++) {
+    DrawRenderPhoton(photons->Kth(i), radius);
+  }
+}
+
+void
+DrawGlobalPhotons(R3Scene *scene)
 {
   double radius = 0.025 * scene->BBox().DiagonalRadius();
 

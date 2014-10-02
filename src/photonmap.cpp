@@ -49,7 +49,8 @@ static int show_lights = 0;
 static int show_bboxes = 0;
 static int show_rays = 0;
 static int show_photons = 0;
-static int show_render_photons = 0;
+static int show_caustic_photons = 0;
+static int show_global_photons = 0;
 static int show_frame_rate = 0;
 
 
@@ -333,11 +334,29 @@ void GLUTRedraw(void)
   }
 
   // Draw rays
-  if (show_render_photons) {
+  if (show_global_photons) {
     glDisable(GL_LIGHTING);
     glColor3d(1.0, 1.0, 1.0);
     glLineWidth(1);
-    DrawRenderPhotons(scene);
+    DrawGlobalPhotons(scene);
+    glLineWidth(1);
+  }
+
+  // Draw rays
+  if (show_caustic_photons) {
+    glDisable(GL_LIGHTING);
+    glColor3d(1.0, 1.0, 1.0);
+    glLineWidth(1);
+    DrawCausticPhotons(scene);
+    glLineWidth(1);
+  }
+
+  // Draw rays
+  if (show_global_photons) {
+    glDisable(GL_LIGHTING);
+    glColor3d(1.0, 1.0, 1.0);
+    glLineWidth(1);
+    DrawGlobalPhotons(scene);
     glLineWidth(1);
   }
 
@@ -531,10 +550,17 @@ void GLUTKeyboard(unsigned char key, int x, int y)
     show_rays = !show_rays;
     break;
 
-  case 'P':
-    show_render_photons = !show_render_photons;
+  case '1':
+  case '!':
+    show_global_photons = !show_global_photons;
     break;
 
+  case '2':
+  case '@':
+    show_caustic_photons = !show_caustic_photons;
+    break;
+
+  case 'P':
   case 'p':
     show_photons = !show_photons;
     break;
