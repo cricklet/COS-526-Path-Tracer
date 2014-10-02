@@ -53,19 +53,36 @@ public:
   void Draw(double radius) const;
   void DrawPath(double radius) const;
 
-  const R3Ray ray;
-  const Photon *source;
+  R3Point position;
+  R3Vector incident;
+
+  R3Vector normal;
+  R3Material *material;
+
+  R3Point source;
   const int color;
+
+  const Photon *parent;
 };
 
-Photon::Photon(R3Ray ray, Photon *source)
-  : ray(ray), source(source), color(source->color)
+Photon::Photon(R3Point position, Photon *parent)
+  : position(position),
+    incident(position - parent->position),
+    source(parent->position),
+    color(parent->color),
+    parent(parent)
 {
+  incident.Normalize();
 }
 
-Photon::Photon(R3Ray ray, int color)
-  : ray(ray), source(NULL), color(color)
+Photon::Photon(R3Point position, R3Point source, int color)
+  : position(position),
+    incident(position - source),
+    source(source),
+    color(color),
+    parent(NULL)
 {
+  incident.Normalize();
 }
 
 void
@@ -75,10 +92,7 @@ Photon::Draw(double radius) const
   if (color == G) glColor3d(0,1,0);
   if (color == B) glColor3d(0,0,1);
 
-  R3Point start = this->ray.Start();
-  R3Vector dir = this->ray.Vector();
-
-  R3Span(start, start + dir * radius).Draw();
+  R3Span(position, position + incident * radius).Draw();
 }
 
 void
@@ -89,19 +103,14 @@ Photon::DrawPath(double radius) const
   if (color == B) glColor3d(0,0,1);
 
   const Photon *photon = this;
-  while (photon != NULL && photon->source != NULL) {
-    R3Point start = photon->ray.Start();
-    R3Point end = photon->source->ray.Start();
-
-    R3Span(start, end).Draw();
-
-    photon = photon->source;
+  while (photon != NULL) {
+    R3Span(photon->position, photon->position).Draw();
+    photon = photon->parent;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////
-// Randomly sample light sources based on their intensity.
-// Generate photons from light sources.
+// Generate rays from lights to shoot photons.
 ////////////////////////////////////////////////////////////////////////
 
 R3Vector RandomVectorUniform() {
@@ -125,21 +134,6 @@ R3Vector RandomVectorInDir(R3Vector dir) {
   }
 }
 
-int PickColor(R3Light *light) {
-  RNRgb color = light->Color();
-  RNScalar total = color.R() + color.G() + color.B();
-  RNScalar r = Random() * total;
-
-  if (r < color.R()) return Photon::R;
-  r -= color.R();
-  if (r < color.G()) return Photon::G;
-  r -= color.G();
-  if (r < color.B()) return Photon::B;
-
-  printf("ERROR: color wat\n");
-  return -1;
-}
-
 R3Vector RandomVectorSpot(R3SpotLight *light) {
   RNAngle cutoffangle = light->CutOffAngle();
   RNScalar dropoffrate = light->DropOffRate();
@@ -156,8 +150,8 @@ R3Vector RandomVectorSpot(R3SpotLight *light) {
   }
 }
 
-Photon *
-PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
+R3Ray
+RayFromDirLight(R3DirectionalLight *light, int scene_radius)
 {
   R3Vector dir = light->Direction();
   dir.Normalize();
@@ -182,26 +176,45 @@ PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
   pos.Rotate(axis, angle);
   pos -= scene_radius * 2 * dir;
 
-  R3Ray ray = R3Ray(pos.Point(), dir);
-  Photon *photon = new Photon(ray, PickColor(light));
-
-  return photon;
+  return R3Ray(pos.Point(), dir);
 }
-Photon *
-PhotonFromPointLight(R3PointLight *light)
-{
-  R3Ray ray = R3Ray(light->Position(), RandomVectorUniform());
-  Photon *photon = new Photon(ray, PickColor(light));
 
-  return photon;
+R3Ray
+RayFromPointLight(R3PointLight *light)
+{
+  return R3Ray(light->Position(), RandomVectorUniform());
 }
-Photon *
-PhotonFromSpotLight(R3SpotLight *light)
-{
-  R3Ray ray = R3Ray(light->Position(), RandomVectorSpot(light));
-  Photon *photon = new Photon(ray, PickColor(light));
 
-  return photon;
+R3Ray
+RayFromSpotLight(R3SpotLight *light)
+{
+  return R3Ray(light->Position(), RandomVectorSpot(light));
+}
+
+////////////////////////////////////////////////////////////////////////
+// Generate photons.
+////////////////////////////////////////////////////////////////////////
+
+int PickColor(R3Light *light) {
+  RNRgb color = light->Color();
+  RNScalar total = color.R() + color.G() + color.B();
+  RNScalar r = Random() * total;
+
+  if (r < color.R()) return Photon::R;
+  r -= color.R();
+  if (r < color.G()) return Photon::G;
+  r -= color.G();
+  if (r < color.B()) return Photon::B;
+
+  printf("ERROR: color wat\n");
+  return -1;
+}
+
+Photon
+ShootPhoton(R3Ray &ray, int color, R3Scene *scene, Photon *parent=NULL) {
+  return Photon(
+    ray.Start(),
+  )
 }
 
 
