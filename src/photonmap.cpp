@@ -49,8 +49,8 @@ static int show_lights = 0;
 static int show_bboxes = 0;
 static int show_rays = 0;
 static int show_photons = 0;
-static int show_caustic_photons = 0;
-static int show_global_photons = 0;
+static int show_caustic_samples = 0;
+static int show_global_samples = 0;
 static int show_frame_rate = 0;
 
 
@@ -334,29 +334,20 @@ void GLUTRedraw(void)
   }
 
   // Draw rays
-  if (show_global_photons) {
+  if (show_global_samples) {
     glDisable(GL_LIGHTING);
     glColor3d(1.0, 1.0, 1.0);
     glLineWidth(1);
-    DrawGlobalPhotons(scene);
+    DrawGlobalSamples(scene);
     glLineWidth(1);
   }
 
   // Draw rays
-  if (show_caustic_photons) {
+  if (show_caustic_samples) {
     glDisable(GL_LIGHTING);
     glColor3d(1.0, 1.0, 1.0);
     glLineWidth(1);
-    DrawCausticPhotons(scene);
-    glLineWidth(1);
-  }
-
-  // Draw rays
-  if (show_global_photons) {
-    glDisable(GL_LIGHTING);
-    glColor3d(1.0, 1.0, 1.0);
-    glLineWidth(1);
-    DrawGlobalPhotons(scene);
+    DrawCausticSamples(scene);
     glLineWidth(1);
   }
 
@@ -552,12 +543,12 @@ void GLUTKeyboard(unsigned char key, int x, int y)
 
   case '1':
   case '!':
-    show_global_photons = !show_global_photons;
+    show_global_samples = !show_global_samples;
     break;
 
   case '2':
   case '@':
-    show_caustic_photons = !show_caustic_photons;
+    show_caustic_samples = !show_caustic_samples;
     break;
 
   case 'P':

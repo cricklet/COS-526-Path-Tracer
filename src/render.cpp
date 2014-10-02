@@ -17,23 +17,23 @@ RNScalar Random() {
 }
 
 ////////////////////////////////////////////////////////////////////////
-// Constant power photon of a specific color for path tracing
+// Photon samples. These provide radiant flux information.
 ////////////////////////////////////////////////////////////////////////
 
-struct RenderPhoton {
+struct PhotonSample {
   R3Point position;
   R3Vector incident;
   RNRgb rgb;
 };
 
 static R3Point
-GetRenderPhotonPointPosition(RenderPhoton *photon, void *dummy)
+GetPhotonSamplePosition(PhotonSample *photon, void *dummy)
 {
   // Return point position (used for Kdtree)
   return photon->position;
 }
 
-void DrawRenderPhoton(RenderPhoton *photon, double radius) {
+void DrawPhotonSample(PhotonSample *photon, double radius) {
   glColor3d(photon->rgb.R(), photon->rgb.G(), photon->rgb.B());
 
   R3Point pos = photon->position;
@@ -48,6 +48,7 @@ class Photon {
 public:
   enum { R, G, B };
   enum { LIGHT, DIFFUSE, SPECULAR, TRANSMISSION };
+  enum { GLOBAL, CAUSTIC };
 
   Photon(R3Ray ray, int color, int photon_type);
   Photon(R3Ray ray, Photon *photon, int photon_type);
@@ -58,15 +59,34 @@ public:
   const Photon *source;
   const int color;
   const int photon_type;
+  const int path_type;
+
+private:
+  int GetPathType();
 };
 
+int
+Photon::GetPathType()
+{
+  if (photon_type == DIFFUSE && source != NULL) {
+    int source_type = source->photon_type;
+    if (source_type == SPECULAR || source_type == TRANSMISSION ) {
+      return CAUSTIC;
+    }
+  }
+
+  return GLOBAL;
+}
+
 Photon::Photon(R3Ray ray, Photon *source, int photon_type)
-  : ray(ray), source(source), color(source->color), photon_type(photon_type)
+  : ray(ray), source(source), color(source->color),
+    photon_type(photon_type), path_type(this->GetPathType())
 {
 }
 
 Photon::Photon(R3Ray ray, int color, int photon_type)
-  : ray(ray), source(NULL), color(color), photon_type(photon_type)
+  : ray(ray), source(NULL), color(color),
+    photon_type(photon_type), path_type(this->GetPathType())
 {
 }
 
@@ -376,8 +396,8 @@ ScatterPhotons(RNArray<Photon *> *source_photons, R3Scene *scene)
 // Store the photons in a KDTree and render them!
 ////////////////////////////////////////////////////////////////////////
 
-RenderPhoton *
-ProcessRenderPhoton(Photon *photon) {
+PhotonSample *
+ProcessPhotonSample(Photon *photon) {
   if (photon->source == NULL) return NULL;
 
   R3Point position = photon->ray.Start();
@@ -385,9 +405,9 @@ ProcessRenderPhoton(Photon *photon) {
   R3Vector incident = position - source;
   incident.Normalize();
 
-  RenderPhoton *render_photon = new RenderPhoton;
-  render_photon->position = position;
-  render_photon->incident = incident;
+  PhotonSample *photon_sample = new PhotonSample;
+  photon_sample->position = position;
+  photon_sample->incident = incident;
 
   int color = photon->color;
   RNRgb rgb;
@@ -395,24 +415,24 @@ ProcessRenderPhoton(Photon *photon) {
   else if (color == Photon::G) rgb = RNRgb(0,1,0);
   else if (color == Photon::B) rgb = RNRgb(0,0,1);
 
-  render_photon->rgb = rgb;
+  photon_sample->rgb = rgb;
 
-  return render_photon;
+  return photon_sample;
 }
 
-RNArray<RenderPhoton *> *
-GenerateRenderPhotons(RNArray<Photon *> *photons, const R3Box& bbox) {
-  RNArray<RenderPhoton *> *render_photons = new RNArray<RenderPhoton *>;
+RNArray<PhotonSample *> *
+GeneratePhotonSamples(RNArray<Photon *> *photons, const R3Box& bbox) {
+  RNArray<PhotonSample *> *photon_samples = new RNArray<PhotonSample *>;
 
   for (int i = 0; i < photons->NEntries(); i ++) {
     Photon *photon = photons->Kth(i);
-    RenderPhoton *render_photon = ProcessRenderPhoton(photon);
-    if (render_photon != NULL) {
-      render_photons->Insert(render_photon);
+    PhotonSample *photon_sample = ProcessPhotonSample(photon);
+    if (photon_sample != NULL) {
+      photon_samples->Insert(photon_sample);
     }
   }
 
-  return render_photons;
+  return photon_samples;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -423,13 +443,15 @@ GenerateRenderPhotons(RNArray<Photon *> *photons, const R3Box& bbox) {
 static RNArray<Photon *> *cached_all_photons = NULL;
 static RNArray<Photon *> *cached_final_photons = NULL;
 
-static RNArray<RenderPhoton *> *cached_render_photons = NULL;
-static R3Kdtree<RenderPhoton *> *cached_kd_render_photons = NULL;
+static RNArray<PhotonSample *> *cached_global_samples = NULL;
+static R3Kdtree<PhotonSample *> *cached_kd_global_samples = NULL;
+
+static RNArray<PhotonSample *> *cached_caustic_samples = NULL;
+static R3Kdtree<PhotonSample *> *cached_kd_caustic_samples = NULL;
 
 void
 CachePhotons(R3Scene *scene) {
   if (cached_final_photons     != NULL
-      && cached_render_photons != NULL
       && cached_all_photons    != NULL) {
     return;
   }
@@ -457,18 +479,8 @@ CachePhotons(R3Scene *scene) {
 
   printf("Finished with %d photons\n", photons->NEntries());
 
-  RNArray<RenderPhoton *> *render_photons =
-    GenerateRenderPhotons(photons, scene->BBox());
-  R3Kdtree<RenderPhoton *> *kd_render_photons =
-    new R3Kdtree<RenderPhoton *>(*render_photons, GetRenderPhotonPointPosition);
-
-  printf("Moved %d render photons into a kd tree\n",
-         render_photons->NEntries());
-
   cached_all_photons = photons;
   cached_final_photons = final_photons;
-  cached_render_photons = render_photons;
-  cached_kd_render_photons = kd_render_photons;
 }
 
 RNArray<Photon *> *
@@ -483,10 +495,61 @@ GetAllPhotons(R3Scene *scene) {
   return cached_all_photons;
 }
 
-RNArray<RenderPhoton *> *
-GetRenderPhotons(R3Scene *scene) {
-  CachePhotons(scene);
-  return cached_render_photons;
+void
+CacheSamples(R3Scene *scene) {
+  if (cached_global_samples     != NULL
+      && cached_caustic_samples != NULL) {
+    return;
+  }
+  printf("Generating photon samples\n");
+
+  RNArray<Photon *> *photons = GetAllPhotons(scene);
+
+  RNArray<Photon *> *caustic_photons = new RNArray<Photon *>;
+  RNArray<Photon *> *global_photons = new RNArray<Photon *>;
+
+  for (int i = 0; i < photons->NEntries(); i ++) {
+    Photon *photon = photons->Kth(i);
+    int type = photon->path_type;
+    if (type == Photon::GLOBAL) {
+      global_photons->Insert(photon);
+    } else if (type == Photon::CAUSTIC){
+      caustic_photons->Insert(photon);
+    }
+  }
+
+  RNArray<PhotonSample *> *global_samples =
+    GeneratePhotonSamples(global_photons, scene->BBox());
+  RNArray<PhotonSample *> *caustic_samples =
+    GeneratePhotonSamples(caustic_photons, scene->BBox());
+
+  R3Kdtree<PhotonSample *> *kd_global_samples =
+    new R3Kdtree<PhotonSample *>(*global_samples, GetPhotonSamplePosition);
+  R3Kdtree<PhotonSample *> *kd_caustic_samples =
+    new R3Kdtree<PhotonSample *>(*caustic_samples, GetPhotonSamplePosition);
+
+  delete caustic_photons;
+  delete global_photons;
+
+  printf("Stored photon samples into kd trees\n");
+
+  cached_global_samples = global_samples;
+  cached_kd_global_samples = kd_global_samples;
+
+  cached_caustic_samples = caustic_samples;
+  cached_kd_caustic_samples = kd_caustic_samples;
+}
+
+RNArray<PhotonSample *> *
+GetGlobalSamples(R3Scene *scene) {
+  CacheSamples(scene);
+  return cached_global_samples;
+}
+
+RNArray<PhotonSample *> *
+GetCausticSamples(R3Scene *scene) {
+  CacheSamples(scene);
+  return cached_caustic_samples;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -494,24 +557,24 @@ GetRenderPhotons(R3Scene *scene) {
 ////////////////////////////////////////////////////////////////////////
 
 void
-DrawCausticPhotons(R3Scene *scene)
+DrawCausticSamples(R3Scene *scene)
 {
-  double radius = 0.025 * scene->BBox().DiagonalRadius();
+  double radius = 0.01 * scene->BBox().DiagonalRadius();
 
-  RNArray<RenderPhoton *> *photons = GetRenderPhotons(scene);
+  RNArray<PhotonSample *> *photons = GetCausticSamples(scene);
   for (int i = 0; i < photons->NEntries(); i ++) {
-    DrawRenderPhoton(photons->Kth(i), radius);
+    DrawPhotonSample(photons->Kth(i), radius);
   }
 }
 
 void
-DrawGlobalPhotons(R3Scene *scene)
+DrawGlobalSamples(R3Scene *scene)
 {
-  double radius = 0.025 * scene->BBox().DiagonalRadius();
+  double radius = 0.01 * scene->BBox().DiagonalRadius();
 
-  RNArray<RenderPhoton *> *photons = GetRenderPhotons(scene);
+  RNArray<PhotonSample *> *photons = GetGlobalSamples(scene);
   for (int i = 0; i < photons->NEntries(); i ++) {
-    DrawRenderPhoton(photons->Kth(i), radius);
+    DrawPhotonSample(photons->Kth(i), radius);
   }
 }
 
