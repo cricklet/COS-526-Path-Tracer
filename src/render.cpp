@@ -41,61 +41,50 @@ void DrawPhotonSample(PhotonSample *photon, double radius) {
 }
 
 ////////////////////////////////////////////////////////////////////////
-// Constant power photon of a specific color for path tracing
+// Constant power photon for path tracing
 ////////////////////////////////////////////////////////////////////////
 
 class Photon {
 public:
-  enum { R, G, B };
   enum { LIGHT, DIFFUSE, SPECULAR, TRANSMISSION };
   enum { GLOBAL, CAUSTIC };
 
-  Photon(R3Ray ray, int color, int photon_type);
-  Photon(R3Ray ray, Photon *photon, int photon_type);
+  Photon(R3Ray ray, RNRgb rgb, int photon_type, Photon *source);
+
   void Draw(double radius) const;
   void DrawPath(double radius) const;
 
   const R3Ray ray;
   const Photon *source;
-  const int color;
+  const RNRgb rgb;
   const int photon_type;
   const int path_type;
-
-private:
-  int GetPathType();
 };
 
 int
-Photon::GetPathType()
+GetPathType(int photon_type, Photon *source)
 {
-  if (photon_type == DIFFUSE && source != NULL) {
+  if (photon_type == Photon::DIFFUSE && source != NULL) {
     int source_type = source->photon_type;
-    if (source_type == SPECULAR || source_type == TRANSMISSION ) {
-      return CAUSTIC;
+    if (source_type == Photon::SPECULAR
+        || source_type == Photon::TRANSMISSION ) {
+      return Photon::CAUSTIC;
     }
   }
 
-  return GLOBAL;
+  return Photon::GLOBAL;
 }
 
-Photon::Photon(R3Ray ray, Photon *source, int photon_type)
-  : ray(ray), source(source), color(source->color),
-    photon_type(photon_type), path_type(this->GetPathType())
-{
-}
-
-Photon::Photon(R3Ray ray, int color, int photon_type)
-  : ray(ray), source(NULL), color(color),
-    photon_type(photon_type), path_type(this->GetPathType())
+Photon::Photon(R3Ray ray, RNRgb rgb, int photon_type, Photon *source=NULL)
+  : ray(ray), source(source), rgb(rgb),
+    photon_type(photon_type), path_type(GetPathType(photon_type, source))
 {
 }
 
 void
 Photon::Draw(double radius) const
 {
-  if (color == R) glColor3d(1,0,0);
-  if (color == G) glColor3d(0,1,0);
-  if (color == B) glColor3d(0,0,1);
+  glColor3d(rgb.R(), rgb.G(), rgb.B());
 
   R3Point start = this->ray.Start();
   R3Vector dir = this->ray.Vector();
@@ -106,15 +95,13 @@ Photon::Draw(double radius) const
 void
 Photon::DrawPath(double radius) const
 {
-  if (color == R) glColor3d(1,0,0);
-  if (color == G) glColor3d(0,1,0);
-  if (color == B) glColor3d(0,0,1);
-
   const Photon *photon = this;
   while (photon != NULL && photon->source != NULL) {
     R3Point start = photon->ray.Start();
     R3Point end = photon->source->ray.Start();
+    RNRgb source_rgb = photon->source->rgb;
 
+    glColor3d(source_rgb.R(), source_rgb.G(), source_rgb.B());
     R3Span(start, end).Draw();
 
     photon = photon->source;
@@ -145,21 +132,6 @@ R3Vector RandomVectorInDir(R3Vector dir) {
     R3Vector rand = RandomVectorUniform();
     if (rand.Dot(dir) > 0) return rand;
   }
-}
-
-int PickColor(R3Light *light) {
-  RNRgb color = light->Color();
-  RNScalar total = color.R() + color.G() + color.B();
-  RNScalar r = Random() * total;
-
-  if (r < color.R()) return Photon::R;
-  r -= color.R();
-  if (r < color.G()) return Photon::G;
-  r -= color.G();
-  if (r < color.B()) return Photon::B;
-
-  printf("ERROR: color wat\n");
-  return -1;
 }
 
 R3Vector RandomVectorSpot(R3SpotLight *light) {
@@ -205,7 +177,7 @@ PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
   pos -= scene_radius * 2 * dir;
 
   R3Ray ray = R3Ray(pos.Point(), dir);
-  Photon *photon = new Photon(ray, PickColor(light), Photon::LIGHT);
+  Photon *photon = new Photon(ray, light->Color(), Photon::LIGHT);
 
   return photon;
 }
@@ -213,7 +185,7 @@ Photon *
 PhotonFromPointLight(R3PointLight *light)
 {
   R3Ray ray = R3Ray(light->Position(), RandomVectorUniform());
-  Photon *photon = new Photon(ray, PickColor(light), Photon::LIGHT);
+  Photon *photon = new Photon(ray, light->Color(), Photon::LIGHT);
 
   return photon;
 }
@@ -221,7 +193,7 @@ Photon *
 PhotonFromSpotLight(R3SpotLight *light)
 {
   R3Ray ray = R3Ray(light->Position(), RandomVectorSpot(light));
-  Photon *photon = new Photon(ray, PickColor(light), Photon::LIGHT);
+  Photon *photon = new Photon(ray, light->Color(), Photon::LIGHT);
 
   return photon;
 }
@@ -283,26 +255,22 @@ PhotonsFromLights(R3Scene *scene, int num)
 // Function for reflections and transmissions
 ////////////////////////////////////////////////////////////////////////
 
-Photon *
+R3Ray
 DiffuseBounce(Photon *source_photon, R3Point pos, R3Vector norm) {
   R3Vector dir = RandomVectorInDir(norm);
-  R3Ray ray = R3Ray(pos, dir);
-  Photon *photon = new Photon(ray, source_photon, Photon::DIFFUSE);
-  return photon;
+  return R3Ray(pos, dir);
 }
 
-Photon *
+R3Ray
 SpecularBounce(Photon *source_photon,
     R3Point inters_pos, R3Vector inters_norm) {
   R3Vector source_dir = -source_photon->ray.Vector();
   R3Vector dir = 2 * inters_norm * inters_norm.Dot(source_dir) - source_dir;
 
-  R3Ray ray = R3Ray(inters_pos, dir);
-  Photon *photon = new Photon(ray, source_photon, Photon::SPECULAR);
-  return photon;
+  return R3Ray(inters_pos, dir);
 }
 
-Photon *
+R3Ray
 TransmissionBounce(Photon *source_photon,
     RNScalar index_of_refraction,
     R3Point inters_pos, R3Vector inters_norm) {
@@ -331,9 +299,17 @@ TransmissionBounce(Photon *source_photon,
   R3Vector dir = n * (ratio * cos(theta_i) - cos(theta_r))
                - l * ratio;
 
-  R3Ray ray = R3Ray(inters_pos, dir);
-  Photon *photon = new Photon(ray, source_photon, Photon::TRANSMISSION);
-  return photon;
+  return R3Ray(inters_pos, dir);
+}
+
+RNScalar
+MaxRGB(RNRgb c) {
+  return fmax(fmax(c.R(), c.G()), c.B());
+}
+
+RNScalar
+CoeffScaledByColor(RNRgb coeff, RNRgb pow) {
+  return MaxRGB(pow * coeff) / MaxRGB(pow);
 }
 
 Photon *
@@ -355,21 +331,30 @@ ScatterPhoton(Photon *source_photon, R3Scene *scene) {
   if (intersected) {
     R3Material *material = element->Material();
     const R3Brdf *brdf = material->Brdf();
-    int color = source_photon->color;
+    RNRgb source_rgb = source_photon->rgb;
 
-    RNScalar kd = brdf->Diffuse()[color];
-    RNScalar ks = brdf->Specular()[color];
-    RNScalar kt = brdf->Transmission()[color];
+    RNScalar kd = CoeffScaledByColor(brdf->Diffuse(), source_rgb);
+    RNScalar ks = CoeffScaledByColor(brdf->Specular(), source_rgb);
+    RNScalar kt = CoeffScaledByColor(brdf->Transmission(), source_rgb);
+
     RNScalar k_total = fmax(1.0, kd + ks + kt);
 
     RNScalar r = Random() * k_total;
     if (r < kd) {
-      return DiffuseBounce(source_photon, point, normal);
+      R3Ray ray = DiffuseBounce(source_photon, point, normal);
+      RNRgb new_rgb = brdf->Diffuse() * source_rgb / kd;
+      return new Photon(ray, new_rgb, Photon::DIFFUSE, source_photon);
+
     } else if (r < ks + kd) {
-      return SpecularBounce(source_photon, point, normal);
+      R3Ray ray = SpecularBounce(source_photon, point, normal);
+      RNRgb new_rgb = brdf->Specular() * source_rgb / ks;
+      return new Photon(ray, new_rgb, Photon::SPECULAR, source_photon);
+
     } else if (r < kt + ks + kd) {
       RNScalar ir = brdf->IndexOfRefraction();
-      return TransmissionBounce(source_photon, ir, point, normal);
+      R3Ray ray = TransmissionBounce(source_photon, ir, point, normal);
+      RNRgb new_rgb = brdf->Transmission() * source_rgb / kt;
+      return new Photon(ray, new_rgb, Photon::TRANSMISSION, source_photon);
     }
   }
 
@@ -409,13 +394,7 @@ ProcessPhotonSample(Photon *photon) {
   photon_sample->position = position;
   photon_sample->incident = incident;
 
-  int color = photon->color;
-  RNRgb rgb;
-  if (color == Photon::R)      rgb = RNRgb(1,0,0);
-  else if (color == Photon::G) rgb = RNRgb(0,1,0);
-  else if (color == Photon::B) rgb = RNRgb(0,0,1);
-
-  photon_sample->rgb = rgb;
+  photon_sample->rgb = photon->rgb;
 
   return photon_sample;
 }
