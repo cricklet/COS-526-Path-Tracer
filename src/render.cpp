@@ -451,12 +451,12 @@ static R3Kdtree<PhotonSample *> *cached_kd_caustic_samples = NULL;
 
 void
 CachePhotons(R3Scene *scene) {
-  if (cached_final_photons     != NULL
-      && cached_all_photons    != NULL) {
+  if (cached_final_photons  != NULL
+      && cached_all_photons != NULL) {
     return;
   }
 
-  int initial_photons = 10000;
+  int initial_photons = 100000;
   int total_photons = initial_photons * 6;
 
   RNArray<Photon *> *photons = PhotonsFromLights(scene, initial_photons);
@@ -552,6 +552,18 @@ GetCausticSamples(R3Scene *scene) {
   return cached_caustic_samples;
 }
 
+R3Kdtree<PhotonSample *> *
+GetKdGlobalSamples(R3Scene *scene) {
+  CacheSamples(scene);
+  return cached_kd_global_samples;
+}
+
+R3Kdtree<PhotonSample *> *
+GetKdCausticSamples(R3Scene *scene) {
+  CacheSamples(scene);
+  return cached_kd_caustic_samples;
+}
+
 ////////////////////////////////////////////////////////////////////////
 // Function to draw debugging data
 ////////////////////////////////////////////////////////////////////////
@@ -570,30 +582,30 @@ DrawCausticSamples(R3Scene *scene)
 void
 DrawGlobalSamples(R3Scene *scene)
 {
-  double radius = 0.01 * scene->BBox().DiagonalRadius();
+  double radius = scene->BBox().DiagonalRadius();
 
   RNArray<PhotonSample *> *photons = GetGlobalSamples(scene);
   for (int i = 0; i < photons->NEntries(); i ++) {
-    DrawPhotonSample(photons->Kth(i), radius);
+    DrawPhotonSample(photons->Kth(i), 0.01 * radius);
   }
 }
 
 void
 DrawPhotons(R3Scene *scene)
 {
-  double radius = 0.01 * scene->BBox().DiagonalRadius();
+  double radius = scene->BBox().DiagonalRadius();
 
   RNArray<Photon *> *all = GetAllPhotons(scene);
   for (int i = 0; i < all->NEntries(); i ++) {
     Photon *photon = all->Kth(i);
-    photon->Draw(radius);
+    photon->Draw(0.01 * radius);
   }
 
   RNArray<Photon *> *final = GetAllPhotons(scene);
   for (int i = 0; i < final->NEntries(); i ++) {
     Photon *photon = all->Kth(i);
     if (Random() > 0.999) {
-      photon->DrawPath(radius);
+      photon->DrawPath(0.01 * radius);
     }
   }
 }
@@ -601,6 +613,54 @@ DrawPhotons(R3Scene *scene)
 ////////////////////////////////////////////////////////////////////////
 // Function to render image with photon mapping
 ////////////////////////////////////////////////////////////////////////
+
+RNRgb RenderPixel(R3Scene *scene, R3Ray ray) {
+  double radius = scene->BBox().DiagonalRadius();
+
+  R3SceneNode *node;
+  R3SceneElement *element;
+  R3Shape *shape;
+  R3Point point;
+  R3Vector normal;
+  RNScalar t;
+
+  RNBoolean intersection = scene->Intersects(ray,
+    &node, &element, &shape, &point, &normal, &t);
+
+  if (!intersection) {
+    return scene->Ambient();
+  }
+
+  R3Kdtree<PhotonSample *> *global_samples = GetKdGlobalSamples(scene);
+  R3Kdtree<PhotonSample *> *caustic_samples = GetKdCausticSamples(scene);
+
+  RNArray<PhotonSample *> samples = RNArray<PhotonSample *>();
+
+  global_samples->FindClosest(point, 0, radius * 0.05, 500, samples);
+  caustic_samples->FindClosest(point, 0, radius * 0.01, 500, samples);
+
+  RNRgb color = RNRgb(0,0,0);
+
+  // If we assume each of these flux samples is passing through the
+  // intersection point, how much of that flux is reflected towards the viewer?
+  // R3Material *material = element->Material();
+  // const R3Brdf *brdf = material->Brdf();
+  // RNScalar kd = brdf->Diffuse()[color];
+  // RNScalar ks = brdf->Specular()[color];
+  // RNScalar kt = brdf->Transmission()[color];
+  // RNScalar k_total = fmax(1.0, kd + ks + kt);
+  //
+  // R3Vector viewer_dir = ray.Start() - point;
+  //
+  // RNScalar num_samples = samples.NEntries();
+  // for (int i = 0; i < num_samples; i ++) {
+  //   PhotonSample *sample = samples.Kth(i);
+  //
+  //   R3Vector incident_dir = sample->incident;
+  // }
+
+  return color;
+}
 
 R2Image *
 RenderImage(R3Scene *scene,
@@ -610,7 +670,6 @@ RenderImage(R3Scene *scene,
   // Start statistics
   RNTime start_time;
   start_time.Read();
-  int ray_count = 0;
 
   // Allocate image
   R2Image *image = new R2Image(width, height);
@@ -619,40 +678,12 @@ RenderImage(R3Scene *scene,
     return NULL;
   }
 
-  // Convenient variables
-  const R3Point& eye = scene->Camera().Origin();
-  R3SceneNode *node;
-  R3SceneElement *element;
-  R3Shape *shape;
-  R3Point point;
-  R3Vector normal;
-  RNScalar t;
-
-  // Draw intersection point and normal for some rays
   for (int i = 0; i < width; i++) {
+    printf("Rendering pixel col %d out of %d\n", i, width);
     for (int j = 0; j < height; j++) {
       R3Ray ray = scene->Viewer().WorldRay(i, j);
-      if (scene->Intersects(ray, &node, &element, &shape, &point, &normal, &t)) {
-        // Get intersection information
-        const R3Material *material = (element) ? element->Material() : NULL;
-        const R3Brdf *brdf = (material) ? material->Brdf() : NULL;
-
-        // Compute color
-        RNRgb color = scene->Ambient();
-        if (brdf) {
-          color += brdf->Emission();
-          for (int k = 0; k < scene->NLights(); k++) {
-            R3Light *light = scene->Light(k);
-            color += light->Reflection(*brdf, eye, point, normal);
-          }
-        }
-
-        // Set pixel color
-        image->SetPixelRGB(i, j, color);
-
-        // Update ray count
-        ray_count++;
-      }
+      RNRgb color = RenderPixel(scene, ray);
+      image->SetPixelRGB(i, j, color);
     }
   }
 
@@ -660,7 +691,6 @@ RenderImage(R3Scene *scene,
   if (print_verbose) {
     printf("Rendered image ...\n");
     printf("  Time = %.2f seconds\n", start_time.Elapsed());
-    printf("  # Rays = %d\n", ray_count);
     fflush(stdout);
   }
 
