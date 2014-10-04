@@ -329,7 +329,7 @@ void GLUTRedraw(void)
     glDisable(GL_LIGHTING);
     glColor3d(1.0, 1.0, 1.0);
     glLineWidth(1);
-    DrawPhotons(scene);
+    DrawPhotonPaths(scene);
     glLineWidth(1);
   }
 

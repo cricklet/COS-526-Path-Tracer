@@ -6,7 +6,7 @@ camera  0.5 3 8    -0.053 -0.316 -0.947    0.003 0.949 -0.316    0.25   0.01 100
 
 # Two lights
 point_light   1 1 1           0.5 1 2   0 0 1
-dir_light     0.2 0.2 0.2     0 -1 0
+dir_light     0.5 0.5 0.5     0 -1 0
 
 # Three shiny materials (red, green, gray)
 material  0 0 0  1 0 0    1 1 1   0 0 0  0 0 0  10 1 0
