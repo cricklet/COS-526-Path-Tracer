@@ -10,6 +10,14 @@
 
 #include "R3Graphics/R3Graphics.h"
 
+////////////////////////////////////////////////////////////////////////
+// Helpers.
+////////////////////////////////////////////////////////////////////////
+
+RNScalar Random() {
+  return static_cast <RNScalar> (rand())
+       / static_cast <RNScalar> (RAND_MAX);
+}
 
 RNRgb
 ClampRGB(RNRgb c) {
@@ -23,106 +31,35 @@ ScaleRGB(RNRgb c) {
   return c / c_max;
 }
 
-RNScalar Random() {
-  return static_cast <RNScalar> (rand())
-       / static_cast <RNScalar> (RAND_MAX);
+RNScalar
+MaxRGB(RNRgb c) {
+  return fmax(fmax(c.R(), c.G()), c.B());
 }
 
-////////////////////////////////////////////////////////////////////////
-// Photon samples. These provide radiant flux information.
-////////////////////////////////////////////////////////////////////////
-
-struct PhotonSample {
-  R3Point position;
-  R3Vector incident;
-  RNRgb rgb;
-};
-
-static R3Point
-GetPhotonSamplePosition(PhotonSample *photon, void *dummy)
-{
-  // Return point position (used for Kdtree)
-  return photon->position;
-}
-
-void DrawPhotonSample(PhotonSample *photon, double radius) {
-  glColor3d(photon->rgb.R(), photon->rgb.G(), photon->rgb.B());
-
-  R3Point pos = photon->position;
-  R3Span(pos, pos - photon->incident * radius).Draw();
-}
-
-////////////////////////////////////////////////////////////////////////
-// Constant power photon for path tracing
-////////////////////////////////////////////////////////////////////////
-
-class Path {
-public:
-  enum { LIGHT, DIFFUSE, SPECULAR, TRANSMISSION };
-
-  Photon(R3Ray ray, RNRgb rgb, int photon_type, Photon *source);
-
-  void Draw(double radius) const;
-  void DrawPath(double radius) const;
-
-  const R3Point start;
-  const R3Point end;
-  const Path *previous;
-  const RNRgb rgb;
-  const int start_type;
-};
-
-int
-GetPathType(int photon_type, Photon *source)
-{
-  if (photon_type == Photon::DIFFUSE && source != NULL) {
-    int source_type = source->photon_type;
-    if (source_type == Photon::SPECULAR
-        || source_type == Photon::TRANSMISSION ) {
-      return Photon::CAUSTIC;
-    }
-  }
-
-  return Photon::GLOBAL;
-}
-
-Photon::Photon(R3Ray ray, RNRgb rgb, int photon_type, Photon *source=NULL)
-  : ray(ray), source(source), rgb(rgb),
-    photon_type(photon_type), path_type(GetPathType(photon_type, source))
-{
+RNScalar
+CoeffScaledByColor(RNRgb coeff, RNRgb pow) {
+  return MaxRGB(pow * coeff) / MaxRGB(pow);
 }
 
 void
-Photon::Draw(double radius) const
+GetCoeffs(RNRgb rgb, const R3Brdf *brdf,
+  RNRgb &diff, RNRgb &spec, RNRgb &trans,
+  RNScalar &kd, RNScalar &ks, RNScalar &kt, RNScalar &k_total)
 {
-  glColor3d(rgb.R(), rgb.G(), rgb.B());
+  diff = ScaleRGB(brdf->Diffuse());
+  spec = ScaleRGB(brdf->Specular());
+  trans = ScaleRGB(brdf->Transmission());
 
-  R3Point start = this->ray.Start();
-  R3Vector dir = this->ray.Vector();
+  // diff = brdf->Diffuse();
+  // spec = brdf->Specular();
+  // trans = brdf->Transmission();
 
-  R3Span(start, start + dir * radius).Draw();
+  kd = CoeffScaledByColor(diff, rgb);
+  ks = CoeffScaledByColor(spec, rgb);
+  kt = CoeffScaledByColor(trans, rgb);
+
+  k_total = fmax(1.0, kd + ks + kt);
 }
-
-void
-Photon::DrawPath(double radius) const
-{
-  const Photon *photon = this;
-  while (photon != NULL && photon->source != NULL) {
-    R3Point start = photon->ray.Start();
-    R3Point end = photon->source->ray.Start();
-    RNRgb source_rgb = photon->source->rgb;
-
-    glColor3d(source_rgb.R(), source_rgb.G(), source_rgb.B());
-    R3Span(start, end).Draw();
-
-    photon = photon->source;
-  }
-}
-
-////////////////////////////////////////////////////////////////////////
-// Randomly sample light sources based on their intensity.
-// Generate photons from light sources.
-////////////////////////////////////////////////////////////////////////
 
 R3Vector RandomVectorUniform() {
   while (true) {
@@ -179,96 +116,79 @@ RotateToVector(R3Vector v, R3Vector original_norm, R3Vector new_norm)
   return v;
 }
 
-Photon *
-PhotonFromDirLight(R3DirectionalLight *light, int scene_radius)
+////////////////////////////////////////////////////////////////////////
+// Photon samples. These provide radiant flux information.
+////////////////////////////////////////////////////////////////////////
+
+struct PhotonSample {
+  R3Point position;
+  R3Vector incident;
+  RNRgb rgb;
+};
+
+static R3Point
+GetPhotonSamplePosition(PhotonSample *photon, void *dummy)
 {
-  R3Vector dir = light->Direction();
-  dir.Normalize();
-
-  RNScalar x, z;
-  while (true) {
-    x = 1.5 * scene_radius * (2.0 * Random() - 1.0);
-    z = 1.5 * scene_radius * (2.0 * Random() - 1.0);
-    if (x*x + z*z < 2 * scene_radius * scene_radius) break;
-  }
-
-  R3Vector pos = R3Vector(x,0,z);
-  pos = RotateToVector(pos, R3Vector(0,1,0), light->Direction());
-  pos -= scene_radius * 2 * dir;
-
-  R3Ray ray = R3Ray(pos.Point(), dir);
-  Photon *photon = new Photon(ray, light->Color(), Photon::LIGHT);
-
-  return photon;
+  // Return point position (used for Kdtree)
+  return photon->position;
 }
-Photon *
-PhotonFromPointLight(R3PointLight *light)
+
+void DrawPhotonSample(PhotonSample *photon, double radius) {
+  glColor3d(photon->rgb.R(), photon->rgb.G(), photon->rgb.B());
+
+  R3Point pos = photon->position;
+  R3Span(pos, pos - photon->incident * radius).Draw();
+}
+
+////////////////////////////////////////////////////////////////////////
+// Constant power photon for path tracing
+////////////////////////////////////////////////////////////////////////
+
+class PhotonPath {
+public:
+  enum { LIGHT, DIFFUSE, SPECULAR, TRANSMISSION };
+
+  PhotonPath(R3Point start, R3Point end, RNRgb rgb, int start_type, Path *next);
+
+  void Draw(double radius, RNBoolean draw_entire_path) const;
+
+  R3Vector Incident();
+
+  const R3Point start;
+  const R3Point end;
+  const RNRgb rgb;
+  const int start_type;
+  const Path *next;
+};
+
+PhotonPath::PhotonPath(R3Point start, R3Point end,
+  RNRgb rgb, int start_type,
+  Path *next)
+  : start(start), end(end),
+    rgb(rgb), start_type(start_type),
+    next(next)
 {
-  R3Ray ray = R3Ray(light->Position(), RandomVectorUniform());
-  Photon *photon = new Photon(ray, light->Color(), Photon::LIGHT);
-
-  return photon;
 }
-Photon *
-PhotonFromSpotLight(R3SpotLight *light)
+
+R3Vector
+PhotonPath::Incident()
 {
-  R3Ray ray = R3Ray(light->Position(), RandomVectorSpot(light));
-  Photon *photon = new Photon(ray, light->Color(), Photon::LIGHT);
-
-  return photon;
+  R3Vector incident = end - start;
+  incident.Normalize();
+  return incident;
 }
 
-
-RNScalar TotalLightIntensity(R3Scene *scene) {
-  RNScalar total = 0;
-  for (int i = 0; i < scene->NLights(); i ++) {
-    R3Light *light = scene->Light(i);
-    total += light->Intensity();
-  }
-  return total;
-}
-
-R3Light *RandomLight(R3Scene *scene, RNScalar total_intensity) {
-  RNScalar r = total_intensity * Random();
-
-  for (int i = 0; i < scene->NLights(); i ++) {
-    R3Light *light = scene->Light(i);
-    r -= light->Intensity();
-
-    if (r < 0) {
-      return light;
-    }
-  }
-  return NULL;
-}
-
-RNArray<Photon *> *
-PhotonsFromLights(R3Scene *scene, int num)
+void
+PhotonPath::Draw(double radius, RNBoolean draw_entire_path) const
 {
-  printf("Generating photons from lights.\n");
-  RNArray<Photon *> *photons = new RNArray<Photon *>;
+  glColor3d(rgb.R(), rgb.G(), rgb.B());
 
-  RNScalar total_intensity = TotalLightIntensity(scene);
-  printf("Total light intensity %f.\n", total_intensity);
+  R3Vector incident = this->Incident();
+  R3Span(end, end - incident * radius).Draw();
 
-  double radius = scene->BBox().DiagonalRadius();
-  for (int i = 0; i < num; i ++) {
-    R3Light *light = RandomLight(scene, total_intensity);
-
-    int light_class = light->ClassID();
-
-    if (light_class == R3DirectionalLight::CLASS_ID()) {
-      photons->Insert(PhotonFromDirLight((R3DirectionalLight *) light, radius));
-    }
-    else if (light_class == R3PointLight::CLASS_ID()) {
-      photons->Insert(PhotonFromPointLight((R3PointLight *) light));
-    }
-    else if (light_class == R3SpotLight::CLASS_ID()) {
-      photons->Insert(PhotonFromSpotLight((R3SpotLight *) light));
-    }
+  if (draw_entire_path) {
+    R3Span(start, end).Draw();
   }
-
-  return photons;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -320,36 +240,6 @@ TransmissionBounce(R3Vector source_dir,
   return R3Ray(inters_pos, dir);
 }
 
-RNScalar
-MaxRGB(RNRgb c) {
-  return fmax(fmax(c.R(), c.G()), c.B());
-}
-
-RNScalar
-CoeffScaledByColor(RNRgb coeff, RNRgb pow) {
-  return MaxRGB(pow * coeff) / MaxRGB(pow);
-}
-
-void
-GetCoeffs(RNRgb rgb, const R3Brdf *brdf,
-  RNRgb &diff, RNRgb &spec, RNRgb &trans,
-  RNScalar &kd, RNScalar &ks, RNScalar &kt, RNScalar &k_total)
-{
-  diff = ScaleRGB(brdf->Diffuse());
-  spec = ScaleRGB(brdf->Specular());
-  trans = ScaleRGB(brdf->Transmission());
-
-  // diff = brdf->Diffuse();
-  // spec = brdf->Specular();
-  // trans = brdf->Transmission();
-
-  kd = CoeffScaledByColor(diff, rgb);
-  ks = CoeffScaledByColor(spec, rgb);
-  kt = CoeffScaledByColor(trans, rgb);
-
-  k_total = fmax(1.0, kd + ks + kt);
-}
-
 RNBoolean
 Bounce(R3Vector source_dir, RNRgb source_rgb,
        R3Point point, R3Vector normal,
@@ -387,38 +277,144 @@ Bounce(R3Vector source_dir, RNRgb source_rgb,
   return false;
 }
 
-Photon *
-ScatterPhoton(Photon *source_photon, R3Scene *scene) {
+////////////////////////////////////////////////////////////////////////
+// Randomly sample light sources based on their intensity.
+// Generate photons from light sources.
+////////////////////////////////////////////////////////////////////////
+
+R3Ray
+RayFromDirLight(R3DirectionalLight *light, int scene_radius)
+{
+  R3Vector dir = light->Direction();
+  dir.Normalize();
+
+  RNScalar x, z;
+  while (true) {
+    x = 1.5 * scene_radius * (2.0 * Random() - 1.0);
+    z = 1.5 * scene_radius * (2.0 * Random() - 1.0);
+    if (x*x + z*z < 2 * scene_radius * scene_radius) break;
+  }
+
+  R3Vector pos = R3Vector(x,0,z);
+  pos = RotateToVector(pos, R3Vector(0,1,0), light->Direction());
+  pos -= scene_radius * 2 * dir;
+
+  return ray = R3Ray(pos.Point(), dir);
+}
+
+R3Ray
+RayFromPointLight(R3PointLight *light)
+{
+  return R3Ray(light->Position(), RandomVectorUniform());
+}
+
+R3Ray
+RayFromSpotLight(R3SpotLight *light)
+{
+  return R3Ray(light->Position(), RandomVectorSpot(light));
+}
+
+
+RNScalar TotalLightIntensity(R3Scene *scene) {
+  RNScalar total = 0;
+  for (int i = 0; i < scene->NLights(); i ++) {
+    R3Light *light = scene->Light(i);
+    total += light->Intensity();
+  }
+  return total;
+}
+
+R3Light *RandomLight(R3Scene *scene, RNScalar total_intensity) {
+  RNScalar r = total_intensity * Random();
+
+  for (int i = 0; i < scene->NLights(); i ++) {
+    R3Light *light = scene->Light(i);
+    r -= light->Intensity();
+
+    if (r < 0) {
+      return light;
+    }
+  }
+  return NULL;
+}
+
+PhotonPath *
+CreatePhotonPath(R3Ray start_ray, RNRgb start_color, int start_type)
+{
+  // intersection variables
   R3SceneNode *node;
   R3SceneElement *element;
   R3Shape *shape;
-  R3Point point;
+  R3Point intersection;
   R3Vector normal;
   RNScalar t;
 
   // offset the ray a bit
-  R3Ray source_ray = source_photon->ray;
-  R3Vector source_dir = source_ray.Vector();
-  R3Ray ray = R3Ray(source_ray.Point(0.01), source_dir);
+  R3Ray ray = R3Ray(start_ray.Point(0.01), start_ray.Vector());
 
   RNBoolean intersected = scene->Intersects(ray,
-    &node, &element, &shape, &point, &normal, &t);
+    &node, &element, &shape, &intersection, &normal, &t);
 
+  // don't create a photon path if there's no intersection
   if (!intersected) {
     return NULL;
   }
 
-  RNRgb new_rgb;
-  int collision_type;
+  // bounce at the intersection
   R3Ray new_ray;
-  RNBoolean bounced = Bounce(source_dir, source_photon->rgb,
-      point, normal, element->Material(), new_ray, new_rgb, collision_type);
+  RNRgb new_rgb;
+  int new_type;
+  RNBoolean bounced = Bounce(
+    start_ray.Vector(), start_color, intersection, normal,
+    element->Material(), new_ray, new_rgb, collision_type);
 
+  // create a new photon path at the intersection
+  PhotonPath *new_path = NULL;
   if (bounced) {
-    return new Photon(new_ray, new_rgb, collision_type, source_photon);
-  } else {
-    return NULL;
+    new_path = CreatePhotonPath(new_ray, new_rgb, new_type);
   }
+
+  // create path from start to intersection, with start's color/type
+  PhotonPath *path = new PhotonPath(start_ray.Start(), intersection,
+    start_color, start_type, new_path);
+
+  return path;
+}
+
+RNArray<PhotonPath *> *
+CreatePhotonPathsFromLights(R3Scene *scene, int num)
+{
+  printf("Generating photon paths from lights.\n");
+  RNArray<PhotonPaths *> *paths = new RNArray<PhotonPaths *>;
+
+  RNScalar total_intensity = TotalLightIntensity(scene);
+  printf("Total light intensity %f.\n", total_intensity);
+
+  double radius = scene->BBox().DiagonalRadius();
+  for (int i = 0; i < num; i ++) {
+    R3Light *light = RandomLight(scene, total_intensity);
+
+    int light_class = light->ClassID();
+
+    R3Ray ray;
+
+    if (light_class == R3DirectionalLight::CLASS_ID()) {
+      ray = RayFromDirLight((R3DirectionalLight *) light, radius);
+    }
+    else if (light_class == R3PointLight::CLASS_ID()) {
+      ray = RayFromPointLight((R3PointLight *) light);
+    }
+    else if (light_class == R3SpotLight::CLASS_ID()) {
+      ray = FromSpotLight((R3SpotLight *) light);
+    }
+
+    PhotonPath *path = CreatePhotonPathFromRay(ray,
+      light->Color(), PhotonPath::LIGHT);
+
+    paths->Insert(path);
+  }
+
+  return paths;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -426,38 +422,15 @@ ScatterPhoton(Photon *source_photon, R3Scene *scene) {
 ////////////////////////////////////////////////////////////////////////
 
 PhotonSample *
-ProcessPhotonSample(Photon *photon) {
-  if (photon->source == NULL) {
-    return NULL;
-  }
-
-  R3Point position = photon->ray.Start();
-  R3Point source = photon->source->ray.Start();
-  R3Vector incident = position - source;
-  incident.Normalize();
+CreatePhotonSample(PhotonPath *path) {
+  R3Vector incident = path->Incident();
 
   PhotonSample *photon_sample = new PhotonSample;
-  photon_sample->position = position;
+  photon_sample->position = path->end;
   photon_sample->incident = incident;
-
-  photon_sample->rgb = photon->rgb;
+  photon_sample->rgb = path->rgb;
 
   return photon_sample;
-}
-
-RNArray<PhotonSample *> *
-GeneratePhotonSamples(RNArray<Photon *> *photons, const R3Box& bbox) {
-  RNArray<PhotonSample *> *photon_samples = new RNArray<PhotonSample *>;
-
-  for (int i = 0; i < photons->NEntries(); i ++) {
-    Photon *photon = photons->Kth(i);
-    PhotonSample *photon_sample = ProcessPhotonSample(photon);
-    if (photon_sample != NULL) {
-      photon_samples->Insert(photon_sample);
-    }
-  }
-
-  return photon_samples;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -465,8 +438,7 @@ GeneratePhotonSamples(RNArray<Photon *> *photons, const R3Box& bbox) {
 // (both path tracing + rendering)
 ////////////////////////////////////////////////////////////////////////
 
-static RNArray<Photon *> *cached_all_photons = NULL;
-static RNArray<Photon *> *cached_final_photons = NULL;
+static RNArray<PhotonPath *> *cached_paths = NULL;
 
 static RNArray<PhotonSample *> *cached_global_samples = NULL;
 static R3Kdtree<PhotonSample *> *cached_kd_global_samples = NULL;
@@ -475,49 +447,21 @@ static RNArray<PhotonSample *> *cached_caustic_samples = NULL;
 static R3Kdtree<PhotonSample *> *cached_kd_caustic_samples = NULL;
 
 void
-CachePhotons(R3Scene *scene) {
-  if (cached_final_photons  != NULL
-      && cached_all_photons != NULL) {
+CachePhotonPaths(R3Scene *scene) {
+  if (cached_paths  != NULL) {
     return;
   }
 
-  int initial_photons = 1000000;
-  int total_photons = initial_photons * 10;
+  RNArray<PhotonPath *> *paths = CreatePhotonPathsFromLights(scene, 1000000);
+  printf("Created initial %d photons\n", paths->NEntries());
 
-  RNArray<Photon *> *photons = PhotonsFromLights(scene, initial_photons);
-  printf("Creating initial %d photons\n", photons->NEntries());
-
-  RNArray<Photon *> *final_photons = new RNArray<Photon *>;
-  for (int i = 0; i < photons->NEntries(); i ++) {
-    Photon *photon = photons->Kth(i);
-    Photon *scattered_photon = ScatterPhoton(photon, scene);
-    if (scattered_photon != NULL) {
-      photons->Insert(scattered_photon);
-    } else {
-      final_photons->Insert(photon);
-    }
-
-    if (photons->NEntries() > total_photons) {
-      break;
-    }
-  }
-
-  printf("Finished with %d photons\n", photons->NEntries());
-
-  cached_all_photons = photons;
-  cached_final_photons = final_photons;
+  cached_paths = paths;
 }
 
-RNArray<Photon *> *
-GetFinalPhotons(R3Scene *scene) {
-  CachePhotons(scene);
-  return cached_final_photons;
-}
-
-RNArray<Photon *> *
-GetAllPhotons(R3Scene *scene) {
-  CachePhotons(scene);
-  return cached_all_photons;
+RNArray<PhotonPath *> *
+GetPhotonPaths(R3Scene *scene) {
+  CachePhotonPaths(scene);
+  return cached_paths;
 }
 
 void
@@ -528,33 +472,26 @@ CacheSamples(R3Scene *scene) {
   }
   printf("Generating photon samples\n");
 
-  RNArray<Photon *> *photons = GetAllPhotons(scene);
+  RNArray<PhotonSample *> *global_samples = new RNArray<PhotonSample *>;
+  RNArray<PhotonSample *> *caustic_samples = new RNArray<PhotonSample *>;
 
-  RNArray<Photon *> *caustic_photons = new RNArray<Photon *>;
-  RNArray<Photon *> *global_photons = new RNArray<Photon *>;
-
-  for (int i = 0; i < photons->NEntries(); i ++) {
-    Photon *photon = photons->Kth(i);
-    int type = photon->path_type;
-    if (type == Photon::GLOBAL) {
-      global_photons->Insert(photon);
-    } else if (type == Photon::CAUSTIC){
-      caustic_photons->Insert(photon);
+  RNArray<PhotonPath *> *paths = GetPhotonPaths(scene);
+  for (int i = 0; i < paths->NEntries(); i ++) {
+    PhotonPath *path = paths->Kth(i);
+    while (path != NULL) {
+      if (path->start_type == TRANSMISSION || path->start_type == SPECULAR) {
+        caustic_samples->Insert(CreatePhotonSample(path));
+      } else {
+        global_samples->Insert(CreatePhotonSample(path));
+      }
+      path = path->next;
     }
   }
-
-  RNArray<PhotonSample *> *global_samples =
-    GeneratePhotonSamples(global_photons, scene->BBox());
-  RNArray<PhotonSample *> *caustic_samples =
-    GeneratePhotonSamples(caustic_photons, scene->BBox());
 
   R3Kdtree<PhotonSample *> *kd_global_samples =
     new R3Kdtree<PhotonSample *>(*global_samples, GetPhotonSamplePosition);
   R3Kdtree<PhotonSample *> *kd_caustic_samples =
     new R3Kdtree<PhotonSample *>(*caustic_samples, GetPhotonSamplePosition);
-
-  delete caustic_photons;
-  delete global_photons;
 
   printf("Stored photon samples into kd trees\n");
 
@@ -616,21 +553,18 @@ DrawGlobalSamples(R3Scene *scene)
 }
 
 void
-DrawPhotons(R3Scene *scene)
+DrawPhotonPaths(R3Scene *scene)
 {
   double radius = scene->BBox().DiagonalRadius();
 
-  RNArray<Photon *> *all = GetAllPhotons(scene);
-  for (int i = 0; i < all->NEntries(); i ++) {
-    Photon *photon = all->Kth(i);
-    photon->Draw(0.01 * radius);
-  }
+  RNArray<PhotonPath *> *paths = GetPhotonPaths(scene);
+  for (int i = 0; i < paths->NEntries(); i ++) {
+    PhotonPath *path = paths->Kth(i);
+    RNBoolean draw_entire_path = Random() > 0.999;
 
-  RNArray<Photon *> *final = GetAllPhotons(scene);
-  for (int i = 0; i < final->NEntries(); i ++) {
-    Photon *photon = all->Kth(i);
-    if (Random() > 0.999) {
-      photon->DrawPath(0.01 * radius);
+    while (path != NULL) {
+      path.Draw(radius * 0.01, draw_entire_path);
+      path = path->next;
     }
   }
 }
