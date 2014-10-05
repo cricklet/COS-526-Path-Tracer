@@ -53,7 +53,6 @@ static int show_caustic_samples = 0;
 static int show_global_samples = 0;
 static int show_frame_rate = 0;
 
-
 ////////////////////////////////////////////////////////////////////////
 // Draw functions
 ////////////////////////////////////////////////////////////////////////
@@ -729,6 +728,18 @@ ParseArgs(int argc, char **argv)
       else if (!strcmp(*argv, "-resolution")) {
         argc--; argv++; render_image_width = atoi(*argv);
         argc--; argv++; render_image_height = atoi(*argv);
+      }
+      else if (!strcmp(*argv, "-l")) {
+        argc--; argv++; SetNumLightPhotons(atoi(*argv));
+      }
+      else if (!strcmp(*argv, "-s")) {
+        argc--; argv++; SetNumPixelSamples(atoi(*argv));
+      }
+      else if (!strcmp(*argv, "-p")) {
+        argc--; argv++; SetNumPhotonSamples(atoi(*argv));
+      }
+      else if (!strcmp(*argv, "-d")) {
+        argc--; argv++; SetPhotonSampleDist(atof(*argv));
       }
       else {
         fprintf(stderr, "Invalid program argument: %s", *argv);

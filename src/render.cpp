@@ -10,6 +10,11 @@
 
 #include "R3Graphics/R3Graphics.h"
 
+static int num_light_photons = 100000;
+static int num_pixel_samples = 4;
+static int num_photon_samples = 40;
+static double photon_sample_dist = 0.01;
+
 ////////////////////////////////////////////////////////////////////////
 // Helpers.
 ////////////////////////////////////////////////////////////////////////
@@ -202,16 +207,37 @@ PhotonPath::Draw(double radius, RNBoolean draw_entire_path) const
 ////////////////////////////////////////////////////////////////////////
 
 R3Ray
-DiffuseBounce(R3Point pos, R3Vector norm) {
+DiffuseBounce(R3Point pos, R3Vector norm)
+{
   R3Vector dir = RandomVectorInDir(norm);
   return R3Ray(pos, dir);
 }
 
 R3Ray
-SpecularBounce(R3Vector source_dir, R3Point inters_pos, R3Vector inters_norm) {
-  R3Vector dir = 2 * inters_norm * inters_norm.Dot(- source_dir) + source_dir;
+SpecularBounce(R3Vector source_dir,
+  R3Point inters_pos, R3Vector inters_norm,
+  RNScalar shininess=-1)
+{
+  R3Vector specular_dir = 2 * inters_norm * inters_norm.Dot(- source_dir) + source_dir;
+  if (shininess == -1) {
+    return R3Ray(inters_pos, specular_dir);
 
-  return R3Ray(inters_pos, dir);
+  } else {
+    RNScalar u = Random();
+    RNScalar v = Random();
+    RNAngle polar_angle = acos(pow(u, 1.0/(shininess+1)));
+    RNAngle azimuthal_angle = 2 * M_PI * v;
+
+    R3Vector dir = R3Vector(
+      sin(polar_angle) * cos(azimuthal_angle),
+      sin(polar_angle) * sin(azimuthal_angle),
+      cos(polar_angle)
+    );
+
+    dir = RotateToVector(dir, R3Vector(0,0,1), specular_dir);
+
+    return R3Ray(inters_pos, dir);
+  }
 }
 
 R3Ray
@@ -258,6 +284,13 @@ Bounce(R3Vector source_dir, RNRgb source_rgb,
   RNScalar kd, ks, kt;
   GetBRDFProbabilities(source_rgb, brdf, diff, spec, trans, kd, ks, kt);
 
+  if (ks > 0) {
+      new_rgb = source_rgb * spec / ks;
+      collision_type = PhotonPath::SPECULAR;
+      new_ray = SpecularBounce(source_dir, point, normal, brdf->Shininess());
+      return true;
+  }
+
   RNScalar r = Random();
   if (r < kd) {
     new_rgb = source_rgb * diff / kd; // scale inverse to probability
@@ -268,7 +301,7 @@ Bounce(R3Vector source_dir, RNRgb source_rgb,
   } else if (r < ks + kd) {
     new_rgb = source_rgb * spec / ks;
     collision_type = PhotonPath::SPECULAR;
-    new_ray = SpecularBounce(source_dir, point, normal);
+    new_ray = SpecularBounce(source_dir, point, normal, brdf->Shininess());
     return true;
 
   } else if (r < kt + ks + kd) {
@@ -289,21 +322,18 @@ Bounce(R3Vector source_dir, RNRgb source_rgb,
 ////////////////////////////////////////////////////////////////////////
 
 R3Ray
-RayFromDirLight(R3DirectionalLight *light, int scene_radius)
+RayFromDirLight(R3DirectionalLight *light, R3Point center, double scene_radius)
 {
   R3Vector dir = light->Direction();
   dir.Normalize();
 
-  RNScalar x, z;
-  while (true) {
-    x = 1.5 * scene_radius * (2.0 * Random() - 1.0);
-    z = 1.5 * scene_radius * (2.0 * Random() - 1.0);
-    if (x*x + z*z < 2 * scene_radius * scene_radius) break;
-  }
-
+  RNScalar x = 1.5 * scene_radius * (2.0 * Random() - 1.0);
+  RNScalar z = 1.5 * scene_radius * (2.0 * Random() - 1.0);
   R3Vector pos = R3Vector(x,0,z);
+
   pos = RotateToVector(pos, R3Vector(0,1,0), light->Direction());
   pos -= scene_radius * 2 * dir;
+  pos += center.Vector();
 
   return R3Ray(pos.Point(), dir);
 }
@@ -405,7 +435,8 @@ CreatePhotonPathsFromLights(R3Scene *scene, int num)
     R3Ray ray;
 
     if (light_class == R3DirectionalLight::CLASS_ID()) {
-      ray = RayFromDirLight((R3DirectionalLight *) light, radius);
+      ray = RayFromDirLight((R3DirectionalLight *) light,
+              scene->Centroid(), radius);
     }
     else if (light_class == R3PointLight::CLASS_ID()) {
       ray = RayFromPointLight((R3PointLight *) light);
@@ -458,7 +489,8 @@ CachePhotonPaths(R3Scene *scene) {
     return;
   }
 
-  RNArray<PhotonPath *> *paths = CreatePhotonPathsFromLights(scene, 100000);
+  RNArray<PhotonPath *> *paths =
+    CreatePhotonPathsFromLights(scene, num_light_photons);
   printf("Created initial %d photons\n", paths->NEntries());
 
   cached_paths = paths;
@@ -495,12 +527,15 @@ CacheSamples(R3Scene *scene) {
     }
   }
 
+  printf("%d global photon samples\n", global_samples->NEntries());
+  printf("%d caustic photon samples\n", caustic_samples->NEntries());
+
   R3Kdtree<PhotonSample *> *kd_global_samples =
     new R3Kdtree<PhotonSample *>(*global_samples, GetPhotonSamplePosition);
   R3Kdtree<PhotonSample *> *kd_caustic_samples =
     new R3Kdtree<PhotonSample *>(*caustic_samples, GetPhotonSamplePosition);
 
-  printf("Stored photon samples into kd trees\n");
+  printf("Stored photon samples in kd trees\n");
 
   cached_global_samples = global_samples;
   cached_kd_global_samples = kd_global_samples;
@@ -594,8 +629,10 @@ SamplePhotonsAtPoint(R3Scene *scene,
 
   double radius = scene->BBox().DiagonalRadius();
   global_samples->NNodes();
-  global_samples->FindClosest(point, 0, radius * 0.1, 100, samples);
-  caustic_samples->FindClosest(point, 0, radius * 0.05, 100, samples);
+  global_samples->FindClosest(point, 0,
+    radius * photon_sample_dist, num_photon_samples, samples);
+  caustic_samples->FindClosest(point, 0,
+    radius * photon_sample_dist / 2, num_photon_samples, samples);
 
   RNScalar num_samples = samples.NEntries();
   for (int i = 0; i < num_samples; i ++) {
@@ -612,7 +649,8 @@ SamplePhotonsAtPoint(R3Scene *scene,
 
     RNRgb diffuse_coeff = ScaleRGB(brdf->Diffuse());
 
-    pixel_color += sample_rgb * diffuse_scaling * diffuse_coeff / 100.0;
+    pixel_color += sample_rgb * diffuse_scaling * diffuse_coeff
+                   / (num_photon_samples * 1.5);
   }
 
   return ClampRGB(pixel_color);
@@ -648,21 +686,20 @@ RNRgb RenderRay(R3Scene *scene, R3Ray source_ray) {
   RNScalar kd, ks, kt;
   GetBRDFProbabilities(RNRgb(1,1,1), brdf, diff, spec, trans, kd, ks, kt);
 
-  if (kt > 0) {
-    printf("asdfasdf\n");
-  }
-
   RNScalar r = Random();
 
-  if (r < ks) {
+  if (r < kd) {
+    R3Ray diff_ray = DiffuseBounce(point, normal);
+    rgb += RenderRay(scene, diff_ray) * diff;
+
+  } else if (r < ks + kd) {
     R3Ray spec_ray = SpecularBounce(source_dir, point, normal);
-    RNRgb spec_rgb = RenderRay(scene, spec_ray);
-    rgb += spec * spec_rgb;
-  } else if (r < ks + kt) {
+    rgb += RenderRay(scene, spec_ray) * spec;
+
+  } else if (r < kt + ks + kd) {
     RNScalar ir = brdf->IndexOfRefraction();
     R3Ray trans_ray = TransmissionBounce(source_dir, ir, point, normal);
-    RNRgb trans_rgb = RenderRay(scene, trans_ray);
-    rgb += spec * trans_rgb;
+    rgb += RenderRay(scene, trans_ray) * trans;
   }
 
   return ClampRGB(rgb);
@@ -690,9 +727,8 @@ RenderImage(R3Scene *scene,
       R3Ray ray = scene->Viewer().WorldRay(i, j);
       RNRgb color = RNRgb(0,0,0);
 
-      int num_samples = 8;
-      for (int k = 0; k < num_samples; k ++) {
-        color += RenderRay(scene, ray) / num_samples;
+      for (int k = 0; k < num_pixel_samples; k ++) {
+        color += RenderRay(scene, ray) * (1.0 / num_pixel_samples);
       }
       image->SetPixelRGB(i, j, color);
     }
@@ -708,3 +744,8 @@ RenderImage(R3Scene *scene,
   // Return image
   return image;
 }
+
+void SetNumLightPhotons(int n) { num_light_photons = n; }
+void SetNumPixelSamples(int n) { num_pixel_samples = n; }
+void SetNumPhotonSamples(int n) { num_photon_samples = n; }
+void SetPhotonSampleDist(double d) {photon_sample_dist = d; }
