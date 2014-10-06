@@ -1,0 +1,65 @@
+<h1>Kenrick Rilee - Photon Mapping</h1>
+
+
+<h2>General:</h2>
+<p>It took me a few tried to get to the photon/path data-structures I ended up using. Here's what I tried:</p>
+<ul>
+  <li>Initially, all photons were either red, green, or blue (distinct). Although this would converge to the correct result, I switched away from it because Jenson uses photons that have rgb powers. Many of my sample images will show distinct r/g/b photons.</li>
+  <li>Also, initally, all photons were stored as bounces. For example, if there was a specular reflection, there would be an object that described the incident, location, and rgb of that specific reflection. I switched away from this to instead store segments of paths-- i.e. flux travelling between two points.</li>
+  <li>After tracing paths, I convert the photon path data into simple photon samples which store location, incident, and rgb.</li>
+</ul>
+
+<h2>Photon emission</h2>
+<output src="img/point.jpg" style="height:200px"/><img src="img/dir1.jpg" style="height:200px"/><img src="img/spot.jpg" style="height:200px"/>
+<p>For photon emission, I built a few helper functions for generating random rays and rotating rays. For simple random vectors, I repetitively created random vectors in a cube, culling the ones that fell out of the desired bounds.</p>
+
+<h2>Photon scattering</h2>
+
+<p>Here's some examples of transmission.</p>
+<img src="img/trans.jpg" style="height:200px"/><img src="img/trans2.jpg" style="height:200px"/><img src="img/trans3.jpg" style="height:200px"/>
+
+<p>Here's an example of diffuse reflection (with some transmission).</p>
+<img src="img/diff.jpg" style="height:200px"/>
+
+<p>Here's an example of specular reflection. Note the angle of reflection-- this is before implementing BRDF sampling.</p>
+<img src="img/ref.jpg" style="height:200px"/>
+
+<h2>Russian Routlette</h2>
+
+<p>Initially, calculating the probabilities for this was trivial because my photons were distinct red/green/blue-- i.e. so I only had to deal with kd_r instead of kd_r, kd_g, kd_b.</p>
+
+<h2>Photon storage</h2>
+
+<img src="img/kd.jpg" style="height:200px"/>
+<p>To store the photon information in KDTrees, I distilled the information into it's position, incident vector, and color.</p>
+
+<h2>BRDF importance sampling</h2>
+
+<p>I only implemented BRDF importance sampling for specular reflection because there is no analogous 'shininess' coefficient for transmission. These are images of photon paths reflecting off of two mirrors set 90 degrees to each other. The left most example has a shininess of 100 (which mimics perfect reflection) and the right most example has a shininess of 1.</p>
+<img src="img/brdf1.jpg" style="height:200px" /><img src="img/brdf2.jpg" style="height:200px" /><img src="img/brdf3.jpg" style="height:200px" />
+
+<h2>Multiple photon maps / Photon map visualization</h2>
+
+<p>Here's the caustic + global photon maps.</p>
+<img src="img/bothnew.jpg" style="height:200px" /><img src="img/causticnew.jpg" style="height:200px" /><img src="img/globalnew.jpg" style="height:200px" />
+
+<p>Here's the old version of the photon maps. These versions incorrectly stored the power of the outgoing bounced ray rather than the incoming incident ray.</p>
+<img src="img/both.jpg" style="height:200px" /><img src="img/caustic.jpg" style="height:200px" /><img src="img/global.jpg" style="height:200px" />
+
+<h2>Camera ray tracing</h2>
+
+<p>Here's a rendering with ray traced reflections + transmissions and without.</p>
+<img src="img/bounces.jpg" style="height:200px" /><img src="img/no_bounces.jpg" style="height:200px" />
+
+<h2>Radiance estimation</h2>
+
+<p>Here's a rendering of the photon map. This was done simply by reducing the number/distance of photons sampled per pixel and reducing the number of paths traced.</p>
+<img src="img/map.jpg" style="height:200px" />
+
+<h2>Pixel integration</h2>
+
+<p>Here's renderings with different numbers of samples per pixel. The image on the left uses 4 samples per pixel. The one on the right uses 64 samples per pixel.</p>
+<img src="img/4.jpg" style="height:200px" /><img src="img/16.jpg" style="height:200px" /><img src="img/64.jpg" style="height:200px" />
+
+<h2>Art</h2>
+<img src="art/bugs.jpg" />

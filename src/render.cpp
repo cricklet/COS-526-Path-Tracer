@@ -11,9 +11,9 @@
 #include "R3Graphics/R3Graphics.h"
 
 static int num_light_photons = 100000;
-static int num_pixel_samples = 4;
-static int num_photon_samples = 40;
-static double photon_sample_dist = 0.01;
+static int num_pixel_samples = 16;
+static int num_photon_samples = 32;
+static double photon_sample_dist = 0.02;
 
 ////////////////////////////////////////////////////////////////////////
 // Helpers.
@@ -106,13 +106,13 @@ GetBRDFProbabilities(RNRgb source_rgb, const R3Brdf *brdf,
   trans = brdf->Transmission();
   RNScalar total = MaxRGB(diff) + MaxRGB(spec) + MaxRGB(trans);
 
-  if (total > 0.8) {
+  if (total > 0.97) {
     diff  /= total;
     spec  /= total;
     trans /= total;
-    diff  *= 0.8;
-    spec  *= 0.8;
-    trans *= 0.8;
+    diff  *= 0.97;
+    spec  *= 0.97;
+    trans *= 0.97;
   }
 
   if (MaxRGB(source_rgb) == 0) {
@@ -284,13 +284,6 @@ Bounce(R3Vector source_dir, RNRgb source_rgb,
   RNScalar kd, ks, kt;
   GetBRDFProbabilities(source_rgb, brdf, diff, spec, trans, kd, ks, kt);
 
-  if (ks > 0) {
-      new_rgb = source_rgb * spec / ks;
-      collision_type = PhotonPath::SPECULAR;
-      new_ray = SpecularBounce(source_dir, point, normal, brdf->Shininess());
-      return true;
-  }
-
   RNScalar r = Random();
   if (r < kd) {
     new_rgb = source_rgb * diff / kd; // scale inverse to probability
@@ -310,7 +303,6 @@ Bounce(R3Vector source_dir, RNRgb source_rgb,
     collision_type = PhotonPath::TRANSMISSION;
     new_ray = TransmissionBounce(source_dir, ir, point, normal);
     return true;
-
   }
 
   return false;
@@ -517,8 +509,9 @@ CacheSamples(R3Scene *scene) {
   for (int i = 0; i < paths->NEntries(); i ++) {
     const PhotonPath *path = paths->Kth(i);
     while (path != NULL) {
-      if (path->start_type == PhotonPath::TRANSMISSION
-          || path->start_type == PhotonPath::SPECULAR) {
+      if (path->next != NULL
+          && path->start_type == PhotonPath::TRANSMISSION
+          && path->next->start_type == PhotonPath::DIFFUSE) {
         caustic_samples->Insert(CreatePhotonSample(path));
       } else {
         global_samples->Insert(CreatePhotonSample(path));
@@ -650,13 +643,15 @@ SamplePhotonsAtPoint(R3Scene *scene,
     RNRgb diffuse_coeff = ScaleRGB(brdf->Diffuse());
 
     pixel_color += sample_rgb * diffuse_scaling * diffuse_coeff
-                   / (num_photon_samples * 1.5);
+                   / (num_photon_samples);
   }
+
+  //if (Random() > 0.9999) printf("%f\n", num_samples);
 
   return ClampRGB(pixel_color);
 }
 
-RNRgb RenderRay(R3Scene *scene, R3Ray source_ray) {
+RNRgb RenderRay(R3Scene *scene, R3Ray source_ray, int bounces=0) {
   R3SceneNode *node;
   R3SceneElement *element;
   R3Shape *shape;
@@ -687,19 +682,16 @@ RNRgb RenderRay(R3Scene *scene, R3Ray source_ray) {
   GetBRDFProbabilities(RNRgb(1,1,1), brdf, diff, spec, trans, kd, ks, kt);
 
   RNScalar r = Random();
-
   if (r < kd) {
-    R3Ray diff_ray = DiffuseBounce(point, normal);
-    rgb += RenderRay(scene, diff_ray) * diff;
-
+    R3Ray diff_ray = SpecularBounce(source_dir, point, normal, 0);
+    rgb += RenderRay(scene, diff_ray, bounces + 1) * diff / kd;
   } else if (r < ks + kd) {
     R3Ray spec_ray = SpecularBounce(source_dir, point, normal);
-    rgb += RenderRay(scene, spec_ray) * spec;
-
+    rgb += RenderRay(scene, spec_ray, bounces + 1) * spec / ks;
   } else if (r < kt + ks + kd) {
     RNScalar ir = brdf->IndexOfRefraction();
     R3Ray trans_ray = TransmissionBounce(source_dir, ir, point, normal);
-    rgb += RenderRay(scene, trans_ray) * trans;
+    rgb += RenderRay(scene, trans_ray, bounces + 1) * trans / kt;
   }
 
   return ClampRGB(rgb);
@@ -730,6 +722,7 @@ RenderImage(R3Scene *scene,
       for (int k = 0; k < num_pixel_samples; k ++) {
         color += RenderRay(scene, ray) * (1.0 / num_pixel_samples);
       }
+
       image->SetPixelRGB(i, j, color);
     }
   }

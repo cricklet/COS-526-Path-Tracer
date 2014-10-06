@@ -729,16 +729,16 @@ ParseArgs(int argc, char **argv)
         argc--; argv++; render_image_width = atoi(*argv);
         argc--; argv++; render_image_height = atoi(*argv);
       }
-      else if (!strcmp(*argv, "-l")) {
+      else if (!strcmp(*argv, "-light_photons")) {
         argc--; argv++; SetNumLightPhotons(atoi(*argv));
       }
-      else if (!strcmp(*argv, "-s")) {
+      else if (!strcmp(*argv, "-pixel_samples")) {
         argc--; argv++; SetNumPixelSamples(atoi(*argv));
       }
-      else if (!strcmp(*argv, "-p")) {
+      else if (!strcmp(*argv, "-photon_samples")) {
         argc--; argv++; SetNumPhotonSamples(atoi(*argv));
       }
-      else if (!strcmp(*argv, "-d")) {
+      else if (!strcmp(*argv, "-sample_dist")) {
         argc--; argv++; SetPhotonSampleDist(atof(*argv));
       }
       else {

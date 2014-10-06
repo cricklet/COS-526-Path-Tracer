@@ -30,8 +30,15 @@ output/%.jpg: input/%.scn
 
 all: \
 	$(EXE) \
-        output/ico.jpg
-	
+        output/cornell.jpg \
+        output/cornell2.jpg \
+        output/cos526.jpg \
+        output/dirlight1.jpg \
+        output/dirlight2.jpg \
+        output/reflection.jpg \
+        output/specular.jpg \
+        output/spotlight2.jpg 
+
 clean:
 	cd src; make clean
 	rm -f output/*
