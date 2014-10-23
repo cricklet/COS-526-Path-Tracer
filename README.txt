@@ -1,3 +1,8 @@
+Most code written by me is in src/render.cpp
+
+ORIGINAL README
+===========
+
 This directory contains skeleton code as a starting point for assignment 2 of COS 526.
 
 src/ - source code that can be used as a starting point for your implementation
@@ -6,10 +11,6 @@ output/ - Empty to start -- it will contain your output images
 art/ - Empty to start -- it will contain your art contest submissions
 Makefile - Script to run your program to produce the images in
   the output directory from the files in the input directory
-
-
-COMPILATION
-===========
 
 If you are developing on a Windows machine and have Visual Studio
 installed, use the provided project solution files (src/photonmap.sln)
